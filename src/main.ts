@@ -172,18 +172,15 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
     const baseIndex = hash % colorList.length;
     const baseColor = colorList[baseIndex]!;
 
-    // 6. Track color usage and generate shades if needed
+    // 6. Variant seed: derive a secondary hash to diversify within the same base color
+    const variantSeed = djb2Hash(cleaned + '|v');
+
+    // 7. Track color usage and generate shades if needed
     const colorKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${baseIndex}`;
     const usageCount = colorUsageMap.get(colorKey) || 0;
 
-    let finalColor: string;
-
-    // If this base color has been used before, generate a shade variation
-    if (usageCount > 0) {
-        finalColor = generateShade(baseColor, usageCount, isDarkMode);
-    } else {
-        finalColor = baseColor;
-    }
+    // 8. Apply variant based on seed plus a small shade wobble from usageCount
+    const finalColor = applyVariant(baseColor, variantSeed, usageCount, isDarkMode);
 
     // Update usage count for this base color
     colorUsageMap.set(colorKey, usageCount + 1);
@@ -192,6 +189,44 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
     textColorMap.set(textKey, finalColor);
 
     return finalColor;
+}
+
+// Apply an intra-base variant using a secondary seed and a small shade wobble
+function applyVariant(baseColor: string, variantSeed: number, shadeIndex: number, isDarkMode: boolean): string {
+    // Seed decomposition for deterministic tweaks
+    const rand = (n: number) => Math.abs(((variantSeed >> n) ^ (variantSeed << (n % 13))) & 0xffff) / 0xffff;
+
+    // Compute small deterministic adjustments
+    const hueSign = rand(2) > 0.5 ? 1 : -1;
+    const satSign = rand(4) > 0.5 ? 1 : -1;
+
+    // Hue shift up to ~12 degrees with golden-angle inspired spread
+    const hueAmp = 8 + rand(6) * 4; // 8..12
+    const hueShift = hueSign * hueAmp;
+
+    // Saturation delta 6..12%
+    const satDelta = satSign * (6 + rand(8) * 6);
+
+    // Small lightness adjustment 6..12% directed by mode
+    const lightSign = isDarkMode ? 1 : -1;
+    const lightDelta = lightSign * (6 + rand(10) * 6);
+
+    // Convert to HSL, apply shifts, clamp, then blend with improved generateShade wobble
+    const hex = baseColor.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    const hsl = rgbToHsl(r, g, b);
+
+    hsl.h = (hsl.h + hueShift + 360) % 360;
+    hsl.s = Math.max(35, Math.min(90, hsl.s + satDelta));
+    hsl.l = Math.max(18, Math.min(88, hsl.l + lightDelta));
+
+    const rgb = hslToRgb(hsl.h, hsl.s, hsl.l);
+    const baseVariant = rgbToHex(rgb.r, rgb.g, rgb.b);
+
+    // Add a subtle shade wobble based on usageCount to avoid identical collisions in a run
+    return generateShade(baseVariant, Math.max(0, shadeIndex), isDarkMode);
 }
 
 /**
