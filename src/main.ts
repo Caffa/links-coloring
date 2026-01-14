@@ -75,9 +75,12 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
                             const text = view.state.sliceDoc(node.from, node.to);
 
                             if (type.includes("formatting-link-start")) {
-                                // Check if this is an embed link by looking at the character before the link
+                                // Check if this is an embed link
+                                // 1. Check character before: handles "!" + "[["
                                 const charBefore = node.from > 0 ? view.state.sliceDoc(node.from - 1, node.from) : "";
-                                isEmbed = charBefore === "!";
+                                // 2. Check node text: handles "![[" as a single token
+                                isEmbed = charBefore === "!" || text.startsWith("!");
+
                                 inLink = true;
                                 hasPipe = false;
                                 targetTextBuffer = "";
@@ -86,6 +89,7 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
                             }
                             if (type.includes("formatting-link-end")) {
                                 inLink = false;
+                                isEmbed = false; // Reset embed state just in case
                                 return;
                             }
 
