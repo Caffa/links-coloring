@@ -179,7 +179,7 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
         (hash + 2 * goldenStep) % paletteSize,
     ];
 
-    let baseIndex = candidates[0];
+    let baseIndex: number = candidates[0]!;
     let minUse = Number.MAX_SAFE_INTEGER;
     for (const idx of candidates) {
         const key = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${idx}`;
@@ -202,12 +202,13 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
     const MAX_VARIANTS_PER_BASE = 6;
     if (usageCount >= MAX_VARIANTS_PER_BASE) {
         // Move to a different base using golden step and pick the least used among a few probes
+        const safeBaseIndex = typeof baseIndex === 'number' ? baseIndex : 0;
         const probes = [
-            (baseIndex + goldenStep) % paletteSize,
-            (baseIndex + 2 * goldenStep) % paletteSize,
-            (baseIndex + 3 * goldenStep) % paletteSize,
+            (safeBaseIndex + goldenStep) % paletteSize,
+            (safeBaseIndex + 2 * goldenStep) % paletteSize,
+            (safeBaseIndex + 3 * goldenStep) % paletteSize,
         ];
-        let best = probes[0];
+        let best: number = probes[0]!;
         let bestUse = Number.MAX_SAFE_INTEGER;
         for (const idx of probes) {
             const k = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${idx}`;
