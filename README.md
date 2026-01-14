@@ -41,6 +41,9 @@ The settings menu includes a **visual preview** of the colors in the selected pa
     *   `[[Char - Charlus]]` → Colors based on "Charlus".
     *   `[[Loc - Hogwarts]]` → Colors based on "Hogwarts".
 
+### Notes
+It will ignore embeds.
+
 ## 📦 Installation
 
 ### Manually
