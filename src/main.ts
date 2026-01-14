@@ -9,7 +9,7 @@ import {
 } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 
-import { LinkColorSettings, DEFAULT_SETTINGS, LinkColorSettingTab } from './settings';
+import { LinkColorSettings, DEFAULT_SETTINGS, LinkColorSettingTab, PALETTES } from './settings';
 
 export default class LinkColorPlugin extends Plugin {
     settings: LinkColorSettings;
@@ -20,6 +20,10 @@ export default class LinkColorPlugin extends Plugin {
         this.addSettingTab(new LinkColorSettingTab(this.app, this));
         this.editorExtension = createLinkColorExtension(this);
         this.registerEditorExtension(this.editorExtension);
+
+        this.registerEvent(this.app.workspace.on('css-change', () => {
+            this.app.workspace.updateOptions();
+        }));
     }
 
     async loadSettings() {
@@ -28,7 +32,6 @@ export default class LinkColorPlugin extends Plugin {
 
     async saveSettings() {
         await this.saveData(this.settings);
-        // Trigger a re-render of the editor to apply new settings immediately
         this.app.workspace.updateOptions();
     }
 }
@@ -50,10 +53,8 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
 
             buildDecorations(view: EditorView): DecorationSet {
                 const builder = new RangeSetBuilder<Decoration>();
-                const sat = plugin.settings.saturation;
-                const lit = plugin.settings.lightness;
+                const isDarkMode = document.body.classList.contains('theme-dark');
 
-                // State Machine Variables
                 let inLink = false;
                 let hasPipe = false;
                 let targetTextBuffer = "";
@@ -67,7 +68,6 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
                             const type = node.type.name;
                             const text = view.state.sliceDoc(node.from, node.to);
 
-                            // 1. Link Start
                             if (type.includes("formatting-link-start")) {
                                 inLink = true;
                                 hasPipe = false;
@@ -75,51 +75,37 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
                                 targetColor = "";
                                 return;
                             }
-
-                            // 2. Link End
                             if (type.includes("formatting-link-end")) {
                                 inLink = false;
                                 return;
                             }
 
-                            // 3. Inside Link
                             if (inLink) {
-                                // A. Detect Pipe
                                 if (text === "|" || type.includes("formatting-link-pipe")) {
                                     hasPipe = true;
-                                    targetColor = stringToHslColor(targetTextBuffer, sat, lit);
+                                    targetColor = getColor(targetTextBuffer, plugin.settings, isDarkMode);
                                     return;
                                 }
 
-                                // B. Content
                                 if (!type.includes("formatting")) {
                                     if (!hasPipe) {
-                                        // Accumulate Target
                                         targetTextBuffer += text;
-
-                                        // Color the Target (Visible when editing)
-                                        const dynColor = stringToHslColor(targetTextBuffer, sat, lit);
+                                        const dynColor = getColor(targetTextBuffer, plugin.settings, isDarkMode);
                                         builder.add(
                                             node.from,
                                             node.to,
                                             Decoration.mark({
-                                                attributes: {
-                                                    style: generateStyleString(dynColor)
-                                                },
+                                                attributes: { style: generateStyleString(dynColor) },
                                                 class: "consistent-link-target"
                                             })
                                         );
-
                                     } else {
-                                        // Color the Alias (Using the Target's color)
                                         if (targetColor) {
                                             builder.add(
                                                 node.from,
                                                 node.to,
                                                 Decoration.mark({
-                                                    attributes: {
-                                                        style: generateStyleString(targetColor)
-                                                    },
+                                                    attributes: { style: generateStyleString(targetColor) },
                                                     class: "consistent-link-alias"
                                                 })
                                             );
@@ -140,7 +126,33 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
     );
 }
 
-// Helper: Generates a CSS string that forces the color to apply
+function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean): string {
+    // 1. Clean Prefix
+    if (settings.ignorePrefix && text.includes(" - ")) {
+        const parts = text.split(" - ");
+        const namePart = parts[parts.length - 1];
+        if (namePart) text = namePart.trim();
+    }
+
+    // 2. Hash
+    let hash = 5381;
+    for (let i = 0; i < text.length; i++) {
+        hash = ((hash << 5) + hash) + text.charCodeAt(i);
+        hash = hash & hash;
+    }
+    hash = Math.abs(hash);
+
+    // 3. FIX: Select Palette with fallback and assertion (!)
+    // The '!' tells TypeScript we are 100% sure 'vibrant' exists in PALETTES.
+    const paletteObj = PALETTES[settings.palette] ?? PALETTES['vibrant']!;
+    const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
+
+    // 4. FIX: Pick Color with assertion (!)
+    // Since hash % length is always valid index, we tell TS this string will exist.
+    const index = hash % colorList.length;
+    return colorList[index]!;
+}
+
 function generateStyleString(color: string) {
     return `
         color: ${color} !important;
@@ -149,14 +161,4 @@ function generateStyleString(color: string) {
         --link-external-color: ${color} !important;
         font-weight: bold;
     `;
-}
-
-// Helper: Hashing function
-function stringToHslColor(str: string, s: number, l: number) {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        hash = str.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const h = Math.abs(hash) % 360;
-    return `hsl(${h}, ${s}%, ${l}%)`;
 }
