@@ -1,7 +1,7 @@
 {
 	"id": "link-colorer",
 	"name": "Link Colorer",
-	"version": "1.0.6",
+	"version": "1.0.7",
 	"minAppVersion": "0.15.0",
 	"description": "Colors the links differently to help differentiate the links and give them a consistent color scheme.",
 	"author": "Pamela Wang",
