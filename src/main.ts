@@ -163,18 +163,18 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
 
     const baseIndex = hash % colorList.length;
     const baseColor = colorList[baseIndex]!;
-    
+
     // 5. Track color usage and generate shades if needed
     const colorKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${baseIndex}`;
     const usageCount = colorUsageMap.get(colorKey) || 0;
-    
+
     // If this color has been used before, generate a shade variation
     if (usageCount > 0) {
         const shadeVariation = generateShade(baseColor, usageCount, isDarkMode);
         colorUsageMap.set(colorKey, usageCount + 1);
         return shadeVariation;
     }
-    
+
     colorUsageMap.set(colorKey, usageCount + 1);
     return baseColor;
 }
@@ -183,7 +183,7 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
  * Generate a shade variation of a color.
  * In dark mode: creates lighter shades (increases brightness)
  * In light mode: creates darker shades (decreases brightness)
- * 
+ *
  * @param color - The base color in hex format
  * @param shadeIndex - Which shade variation (1 = first variation, 2 = second, etc.)
  * @param isDarkMode - Whether we're in dark mode
@@ -195,15 +195,15 @@ function generateShade(color: string, shadeIndex: number, isDarkMode: boolean): 
     const r = parseInt(hex.substring(0, 2), 16);
     const g = parseInt(hex.substring(2, 4), 16);
     const b = parseInt(hex.substring(4, 6), 16);
-    
+
     // Convert RGB to HSL for easier manipulation
     const hsl = rgbToHsl(r, g, b);
-    
+
     // Adjust lightness based on shade index and mode
     // In dark mode: increase lightness (lighter shades)
     // In light mode: decrease lightness (darker shades)
     const lightnessDelta = shadeIndex * 8; // 8% per shade level
-    
+
     if (isDarkMode) {
         // Lighter shades: increase lightness
         hsl.l = Math.min(100, hsl.l + lightnessDelta);
@@ -211,7 +211,7 @@ function generateShade(color: string, shadeIndex: number, isDarkMode: boolean): 
         // Darker shades: decrease lightness
         hsl.l = Math.max(0, hsl.l - lightnessDelta);
     }
-    
+
     // Convert back to RGB and then to hex
     const rgb = hslToRgb(hsl.h, hsl.s, hsl.l);
     return rgbToHex(rgb.r, rgb.g, rgb.b);
@@ -224,17 +224,17 @@ function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: n
     r /= 255;
     g /= 255;
     b /= 255;
-    
+
     const max = Math.max(r, g, b);
     const min = Math.min(r, g, b);
     let h = 0;
     let s = 0;
     const l = (max + min) / 2;
-    
+
     if (max !== min) {
         const d = max - min;
         s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-        
+
         switch (max) {
             case r:
                 h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
@@ -247,7 +247,7 @@ function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: n
                 break;
         }
     }
-    
+
     return { h: h * 360, s: s * 100, l: l * 100 };
 }
 
@@ -258,9 +258,9 @@ function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: n
     h = h / 360;
     s = s / 100;
     l = l / 100;
-    
+
     let r, g, b;
-    
+
     if (s === 0) {
         r = g = b = l;
     } else {
@@ -272,14 +272,14 @@ function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: n
             if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
             return p;
         };
-        
+
         const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
         const p = 2 * l - q;
         r = hue2rgb(p, q, h + 1 / 3);
         g = hue2rgb(p, q, h);
         b = hue2rgb(p, q, h - 1 / 3);
     }
-    
+
     return {
         r: Math.round(r * 255),
         g: Math.round(g * 255),
