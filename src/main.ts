@@ -74,11 +74,12 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
                             const type = node.type.name;
                             const text = view.state.sliceDoc(node.from, node.to);
 
+                            // 1. Detect Link Start
                             if (type.includes("formatting-link-start")) {
-                                // Check if this is an embed link
-                                // 1. Check character before: handles "!" + "[["
                                 const charBefore = node.from > 0 ? view.state.sliceDoc(node.from - 1, node.from) : "";
-                                // 2. Check node text: handles "![[" as a single token
+
+                                // Fix: Check both the character before AND if the token itself starts with '!'
+                                // This covers cases where "![[" is parsed as a single token.
                                 isEmbed = charBefore === "!" || text.startsWith("!");
 
                                 inLink = true;
@@ -87,13 +88,25 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
                                 targetColor = "";
                                 return;
                             }
-                            if (type.includes("formatting-link-end")) {
+
+                            // 2. Detect Link End
+                            // Fix: Explicitly check for "]]" to ensure we close the link state even if the
+                            // token type is unexpected (e.g., inside an embed block).
+                            if (type.includes("formatting-link-end") || text === "]]") {
                                 inLink = false;
-                                isEmbed = false; // Reset embed state just in case
+                                isEmbed = false;
                                 return;
                             }
 
                             if (inLink && !isEmbed) {
+                                // 3. Runaway Safety
+                                // If we hit a newline while in a link, assume the link was malformed or
+                                // we missed the end token. This prevents coloring the rest of the document.
+                                if (text.includes("\n")) {
+                                    inLink = false;
+                                    return;
+                                }
+
                                 if (text === "|" || type.includes("formatting-link-pipe")) {
                                     hasPipe = true;
                                     targetColor = getColor(targetTextBuffer, plugin.settings, isDarkMode);
