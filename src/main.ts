@@ -61,6 +61,7 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
                 const isDarkMode = document.body.classList.contains('theme-dark');
 
                 let inLink = false;
+                let isEmbed = false;
                 let hasPipe = false;
                 let targetTextBuffer = "";
                 let targetColor = "";
@@ -74,6 +75,9 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
                             const text = view.state.sliceDoc(node.from, node.to);
 
                             if (type.includes("formatting-link-start")) {
+                                // Check if this is an embed link by looking at the character before the link
+                                const charBefore = node.from > 0 ? view.state.sliceDoc(node.from - 1, node.from) : "";
+                                isEmbed = charBefore === "!";
                                 inLink = true;
                                 hasPipe = false;
                                 targetTextBuffer = "";
@@ -85,7 +89,7 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
                                 return;
                             }
 
-                            if (inLink) {
+                            if (inLink && !isEmbed) {
                                 if (text === "|" || type.includes("formatting-link-pipe")) {
                                     hasPipe = true;
                                     targetColor = getColor(targetTextBuffer, plugin.settings, isDarkMode);
