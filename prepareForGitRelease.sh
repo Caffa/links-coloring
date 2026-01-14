@@ -10,6 +10,10 @@ cp manifest.json link-colorer
 cp styles.css link-colorer
 # compress the current_release folder into a zip file
 # zip -r release.zip current_release
+
+# send to my novel folder
+cp -r link-colorer /Users/caffae/Notes/Novel-Writing/.obsidian/plugins/
+
 zip -vr link-colorer.zip link-colorer -x "*.DS_Store"
 
 mv link-colorer.zip release.zip
