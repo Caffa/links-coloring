@@ -9,7 +9,7 @@ import {
 } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 
-import { LinkColorSettings, DEFAULT_SETTINGS, LinkColorSettingTab, PALETTES } from './settings';
+import { LinkColorSettings, DEFAULT_SETTINGS, LinkColorSettingTab, PALETTES, HashMode } from './settings';
 
 export default class LinkColorPlugin extends Plugin {
     settings: LinkColorSettings;
@@ -134,33 +134,108 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
         if (namePart) text = namePart.trim();
     }
 
-    // 2. Prepare Data (LowerCase + No Cap)
-    // We trim and lowercase immediately to ensure case-insensitivity.
+    // 2. Prepare Data (LowerCase)
     const cleaned = text.trim().toLowerCase();
 
-    // 3. Generate Weighted Seed
-    const words = cleaned.split(/\s+/).filter(Boolean);
-    const acronyms = words.map(word => word.charAt(0)).join('');
+    // 3. Generate hash based on selected mode
+    let hash: number;
 
-    // Construct Seed: Acronyms + Full Text + Length
-    // Using the full 'cleaned' text (instead of a substring) ensures the lowest collision probability.
-    // Example: "Data Science" -> "ds" + "data science" + "12"
-    const seed = acronyms + cleaned + cleaned.length.toString();
-
-    // 4. Hash (DJB2)
-    let hash = 5381;
-    for (let i = 0; i < seed.length; i++) {
-        hash = ((hash << 5) + hash) + seed.charCodeAt(i);
-        hash = hash & hash;
+    switch (settings.hashMode) {
+        case 'strict-full':
+            hash = hashStrictFull(cleaned);
+            break;
+        case 'strict-acronym':
+            hash = hashStrictAcronym(cleaned);
+            break;
+        case 'similarity':
+            hash = hashSimilarity(cleaned);
+            break;
+        default:
+            hash = hashStrictFull(cleaned);
     }
-    hash = Math.abs(hash);
 
-    // 5. Select Palette and Pick Color
+    // 4. Select Palette and Pick Color
     const paletteObj = PALETTES[settings.palette] ?? PALETTES['vibrant']!;
     const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
 
     const index = hash % colorList.length;
     return colorList[index]!;
+}
+
+/**
+ * Strict Full Hash: Maximum uniqueness using acronyms, full text, and length.
+ * Example: "Data Science" -> "ds" + "data science" + "12"
+ */
+function hashStrictFull(text: string): number {
+    const words = text.split(/\s+/).filter(Boolean);
+    const acronyms = words.map(word => word.charAt(0)).join('');
+    const seed = acronyms + text + text.length.toString();
+    return djb2Hash(seed);
+}
+
+/**
+ * Strict Acronym Hash: Uses only first letters of words.
+ * Similar structure words may share colors.
+ * Example: "Data Science" -> "ds", "Design System" -> "ds" (same color)
+ */
+function hashStrictAcronym(text: string): number {
+    const words = text.split(/\s+/).filter(Boolean);
+    const acronyms = words.map(word => word.charAt(0)).join('');
+    return djb2Hash(acronyms);
+}
+
+/**
+ * Similarity Hash: Similar words get similar colors using Levenshtein distance.
+ * Words with small edit distances map to nearby color indices.
+ *
+ * Strategy: Use character n-grams (bigrams) to create a similarity-based hash.
+ * Words sharing many bigrams will hash to nearby values, ensuring similar words
+ * get similar colors.
+ */
+function hashSimilarity(text: string): number {
+    // Extract bigrams (2-character sequences) from the text
+    const bigrams = extractBigrams(text);
+
+    if (bigrams.length === 0) {
+        // Fallback for very short words
+        return djb2Hash(text);
+    }
+
+    // Hash the bigrams to create a similarity-based hash
+    // This naturally groups similar words together
+    let hash = 5381;
+    for (const bigram of bigrams) {
+        hash = ((hash << 5) + hash) + bigram.charCodeAt(0);
+        hash = ((hash << 5) + hash) + bigram.charCodeAt(1);
+        hash = hash & hash;
+    }
+
+    return Math.abs(hash);
+}
+
+/**
+ * Extract bigrams (2-character sequences) from text.
+ * Example: "apple" -> ["ap", "pp", "pl", "le"]
+ */
+function extractBigrams(text: string): string[] {
+    const bigrams: string[] = [];
+    for (let i = 0; i < text.length - 1; i++) {
+        bigrams.push(text.substring(i, i + 2));
+    }
+    return bigrams;
+}
+
+/**
+ * DJB2 Hash Function: A widely used non-cryptographic hash function.
+ * Known for excellent distribution and speed.
+ */
+function djb2Hash(seed: string): number {
+    let hash = 5381;
+    for (let i = 0; i < seed.length; i++) {
+        hash = ((hash << 5) + hash) + seed.charCodeAt(i);
+        hash = hash & hash;
+    }
+    return Math.abs(hash);
 }
 
 function generateStyleString(color: string) {

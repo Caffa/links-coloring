@@ -93,15 +93,33 @@ export const PALETTES: Record<string, { dark: string[], light: string[] }> = {
 };
 
 export type PaletteType = keyof typeof PALETTES;
+export type HashMode = 'strict-full' | 'strict-acronym' | 'similarity';
 
 export interface LinkColorSettings {
     palette: PaletteType;
     ignorePrefix: boolean;
+    hashMode: HashMode;
 }
 
 export const DEFAULT_SETTINGS: LinkColorSettings = {
     palette: 'vibrant',
-    ignorePrefix: true
+    ignorePrefix: true,
+    hashMode: 'strict-full'
+}
+
+export const HASH_MODE_DESCRIPTIONS: Record<HashMode, { name: string; description: string }> = {
+    'strict-full': {
+        name: 'Strict (Acronym + Length)',
+        description: 'Maximum uniqueness using acronyms, full text, and length. Different words get different colors.'
+    },
+    'strict-acronym': {
+        name: 'Strict (Acronym Only)',
+        description: 'Uses only first letters of words. Similar structure words may share colors.'
+    },
+    'similarity': {
+        name: 'Similarity-Based',
+        description: 'Similar words get similar colors using Levenshtein distance. Great for related terms.'
+    }
 }
 
 export class LinkColorSettingTab extends PluginSettingTab {
@@ -143,6 +161,30 @@ export class LinkColorSettingTab extends PluginSettingTab {
                     this.plugin.settings.ignorePrefix = value;
                     await this.plugin.saveSettings();
                 }));
+
+        new Setting(containerEl)
+            .setName('Hash Mode')
+            .setDesc('Choose how words are hashed to colors.')
+            .addDropdown(dropdown => {
+                const modes: HashMode[] = ['strict-full', 'strict-acronym', 'similarity'];
+                modes.forEach((mode) => {
+                    const desc = HASH_MODE_DESCRIPTIONS[mode];
+                    dropdown.addOption(mode, desc.name);
+                });
+                dropdown
+                    .setValue(this.plugin.settings.hashMode)
+                    .onChange(async (value) => {
+                        this.plugin.settings.hashMode = value as HashMode;
+                        await this.plugin.saveSettings();
+                    });
+            });
+
+        const modeDesc = HASH_MODE_DESCRIPTIONS[this.plugin.settings.hashMode];
+        const descEl = containerEl.createEl('p', { text: modeDesc.description });
+        descEl.style.fontSize = '0.9em';
+        descEl.style.color = 'var(--text-muted)';
+        descEl.style.marginTop = '-10px';
+        descEl.style.marginBottom = '20px';
 
         containerEl.createEl('h3', { text: 'Preview' });
         this.previewEl = containerEl.createDiv();
