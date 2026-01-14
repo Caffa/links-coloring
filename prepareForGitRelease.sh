@@ -20,14 +20,15 @@ mv link-colorer.zip release.zip
 # Get the new version and create a tag without 'v' prefix
 VERSION=$(node -p "require('./package.json').version")
 git add -A
-git commit -m "Prepare for Git Release. Bump version to $VERSION"
+LASTCOMMIT=$(git log -1 --pretty=%B)
+# git commit -m "Prepare for Git Release. Bump version to $VERSION"
+git commit -m "Release version $VERSION, $LASTCOMMIT"
 git tag $VERSION
 # git push origin main
 echo "Pushing to main tag... "
 # echo "git push origin tag $VERSION"
 git push origin tag $VERSION
 echo "Creating a new release... "
-LASTCOMMIT=$(git log -1 --pretty=%B)
 # Create a new release on GitHub with the zip file and the last commit message
 gh release create $VERSION release.zip main.js styles.css manifest.json --title "Release $VERSION" --notes "$LASTCOMMIT"
 

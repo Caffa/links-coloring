@@ -34,6 +34,61 @@ export const PALETTES: Record<string, { dark: string[], light: string[] }> = {
     nord: {
         dark: ["#BF616A", "#8FBCBB", "#B48EAD", "#EBCB8B", "#A3BE8C", "#88C0D0", "#D08770", "#5E81AC"],
         light: ["#BF616A", "#5E81AC", "#B48EAD", "#D08770", "#A3BE8C", "#88C0D0", "#CBA040", "#81A1C1"]
+    },
+
+     extended: {
+        dark: [
+            "#FF8A80", // Red
+            "#FF5252", // Red Accent
+            "#FF9E80", // Deep Orange
+            "#FFD180", // Orange
+            "#FFE57F", // Amber
+            "#FFFF8D", // Yellow
+            "#CCFF90", // Light Green
+            "#A7FFEB", // Teal Accent
+            "#80D8FF", // Light Blue
+            "#82B1FF", // Blue
+            "#B388FF", // Deep Purple
+            "#EA80FC", // Purple Accent
+            "#FF80AB", // Pink
+            "#CFD8DC", // Blue Grey
+            "#FFD740", // Amber Accent
+            "#69F0AE", // Green Accent
+            "#40C4FF", // Light Blue Accent
+            "#7C4DFF", // Deep Purple Accent
+            "#FF4081", // Pink Accent
+            "#E040FB", // Purple
+            "#18FFFF", // Cyan
+            "#64FFDA", // Teal
+            "#EEFF41", // Lime
+            "#F4FF81"  // Light Lime
+        ],
+        light: [
+            "#B71C1C", // Red
+            "#C62828", // Red Dark
+            "#BF360C", // Deep Orange
+            "#E65100", // Orange
+            "#FF6F00", // Amber
+            "#F57F17", // Yellow (Darkened)
+            "#33691E", // Light Green (Darkened)
+            "#004D40", // Teal
+            "#01579B", // Light Blue
+            "#0D47A1", // Blue
+            "#311B92", // Deep Purple
+            "#4A148C", // Purple
+            "#880E4F", // Pink
+            "#455A64", // Blue Grey
+            "#FF6D00", // Amber Accent
+            "#00C853", // Green
+            "#0091EA", // Light Blue
+            "#6200EA", // Deep Purple
+            "#C51162", // Pink
+            "#AA00FF", // Purple Accent
+            "#00B8D4", // Cyan
+            "#00BFA5", // Teal Accent
+            "#AEEA00", // Lime
+            "#827717"  // Lime Dark
+        ]
     }
 };
 
@@ -107,9 +162,7 @@ export class LinkColorSettingTab extends PluginSettingTab {
         const currentPalette = this.plugin.settings.palette;
         const isDarkMode = document.body.classList.contains('theme-dark');
 
-        // FIX: Provide a safe fallback object
         const palette = PALETTES[currentPalette] || PALETTES['vibrant'];
-        // FIX: Ensure 'palette' is not undefined before accessing .dark/.light
         if (!palette) return;
 
         const colors = isDarkMode ? palette.dark : palette.light;
@@ -126,3 +179,4 @@ export class LinkColorSettingTab extends PluginSettingTab {
         });
     }
 }
+

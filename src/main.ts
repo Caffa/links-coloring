@@ -134,21 +134,31 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
         if (namePart) text = namePart.trim();
     }
 
-    // 2. Hash
+    // 2. Prepare Data (LowerCase + No Cap)
+    // We trim and lowercase immediately to ensure case-insensitivity.
+    const cleaned = text.trim().toLowerCase();
+
+    // 3. Generate Weighted Seed
+    const words = cleaned.split(/\s+/).filter(Boolean);
+    const acronyms = words.map(word => word.charAt(0)).join('');
+
+    // Construct Seed: Acronyms + Full Text + Length
+    // Using the full 'cleaned' text (instead of a substring) ensures the lowest collision probability.
+    // Example: "Data Science" -> "ds" + "data science" + "12"
+    const seed = acronyms + cleaned + cleaned.length.toString();
+
+    // 4. Hash (DJB2)
     let hash = 5381;
-    for (let i = 0; i < text.length; i++) {
-        hash = ((hash << 5) + hash) + text.charCodeAt(i);
+    for (let i = 0; i < seed.length; i++) {
+        hash = ((hash << 5) + hash) + seed.charCodeAt(i);
         hash = hash & hash;
     }
     hash = Math.abs(hash);
 
-    // 3. FIX: Select Palette with fallback and assertion (!)
-    // The '!' tells TypeScript we are 100% sure 'vibrant' exists in PALETTES.
+    // 5. Select Palette and Pick Color
     const paletteObj = PALETTES[settings.palette] ?? PALETTES['vibrant']!;
     const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
 
-    // 4. FIX: Pick Color with assertion (!)
-    // Since hash % length is always valid index, we tell TS this string will exist.
     const index = hash % colorList.length;
     return colorList[index]!;
 }
@@ -162,3 +172,4 @@ function generateStyleString(color: string) {
         font-weight: bold;
     `;
 }
+
