@@ -1,99 +1,162 @@
-import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab} from "./settings";
+import { Plugin } from 'obsidian';
+import { Extension, RangeSetBuilder } from '@codemirror/state';
+import {
+    EditorView,
+    Decoration,
+    DecorationSet,
+    ViewPlugin,
+    ViewUpdate
+} from '@codemirror/view';
+import { syntaxTree } from '@codemirror/language';
 
-// Remember to rename these classes and interfaces!
+import { LinkColorSettings, DEFAULT_SETTINGS, LinkColorSettingTab } from './settings';
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+export default class LinkColorPlugin extends Plugin {
+    settings: LinkColorSettings;
+    editorExtension: Extension;
 
-	async onload() {
-		await this.loadSettings();
+    async onload() {
+        await this.loadSettings();
+        this.addSettingTab(new LinkColorSettingTab(this.app, this));
+        this.editorExtension = createLinkColorExtension(this);
+        this.registerEditorExtension(this.editorExtension);
+    }
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
+    async loadSettings() {
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    }
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				editor.replaceSelection('Sample editor command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-				return false;
-			}
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			new Notice("Click");
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-
-	}
-
-	onunload() {
-	}
-
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<MyPluginSettings>);
-	}
-
-	async saveSettings() {
-		await this.saveData(this.settings);
-	}
+    async saveSettings() {
+        await this.saveData(this.settings);
+        // Trigger a re-render of the editor to apply new settings immediately
+        this.app.workspace.updateOptions();
+    }
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
+function createLinkColorExtension(plugin: LinkColorPlugin) {
+    return ViewPlugin.fromClass(
+        class {
+            decorations: DecorationSet;
 
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
+            constructor(view: EditorView) {
+                this.decorations = this.buildDecorations(view);
+            }
 
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
+            update(update: ViewUpdate) {
+                if (update.docChanged || update.viewportChanged) {
+                    this.decorations = this.buildDecorations(update.view);
+                }
+            }
+
+            buildDecorations(view: EditorView): DecorationSet {
+                const builder = new RangeSetBuilder<Decoration>();
+                const sat = plugin.settings.saturation;
+                const lit = plugin.settings.lightness;
+
+                // State Machine Variables
+                let inLink = false;
+                let hasPipe = false;
+                let targetTextBuffer = "";
+                let targetColor = "";
+
+                for (const { from, to } of view.visibleRanges) {
+                    syntaxTree(view.state).iterate({
+                        from,
+                        to,
+                        enter: (node) => {
+                            const type = node.type.name;
+                            const text = view.state.sliceDoc(node.from, node.to);
+
+                            // 1. Link Start
+                            if (type.includes("formatting-link-start")) {
+                                inLink = true;
+                                hasPipe = false;
+                                targetTextBuffer = "";
+                                targetColor = "";
+                                return;
+                            }
+
+                            // 2. Link End
+                            if (type.includes("formatting-link-end")) {
+                                inLink = false;
+                                return;
+                            }
+
+                            // 3. Inside Link
+                            if (inLink) {
+                                // A. Detect Pipe
+                                if (text === "|" || type.includes("formatting-link-pipe")) {
+                                    hasPipe = true;
+                                    targetColor = stringToHslColor(targetTextBuffer, sat, lit);
+                                    return;
+                                }
+
+                                // B. Content
+                                if (!type.includes("formatting")) {
+                                    if (!hasPipe) {
+                                        // Accumulate Target
+                                        targetTextBuffer += text;
+
+                                        // Color the Target (Visible when editing)
+                                        const dynColor = stringToHslColor(targetTextBuffer, sat, lit);
+                                        builder.add(
+                                            node.from,
+                                            node.to,
+                                            Decoration.mark({
+                                                attributes: {
+                                                    style: generateStyleString(dynColor)
+                                                },
+                                                class: "consistent-link-target"
+                                            })
+                                        );
+
+                                    } else {
+                                        // Color the Alias (Using the Target's color)
+                                        if (targetColor) {
+                                            builder.add(
+                                                node.from,
+                                                node.to,
+                                                Decoration.mark({
+                                                    attributes: {
+                                                        style: generateStyleString(targetColor)
+                                                    },
+                                                    class: "consistent-link-alias"
+                                                })
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                    });
+                }
+
+                return builder.finish();
+            }
+        },
+        {
+            decorations: (v) => v.decorations,
+        }
+    );
+}
+
+// Helper: Generates a CSS string that forces the color to apply
+function generateStyleString(color: string) {
+    return `
+        color: ${color} !important;
+        -webkit-text-fill-color: ${color} !important;
+        --link-color: ${color} !important;
+        --link-external-color: ${color} !important;
+        font-weight: bold;
+    `;
+}
+
+// Helper: Hashing function
+function stringToHslColor(str: string, s: number, l: number) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const h = Math.abs(hash) % 360;
+    return `hsl(${h}, ${s}%, ${l}%)`;
 }

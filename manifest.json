@@ -1,11 +1,11 @@
 {
-	"id": "sample-plugin",
-	"name": "Sample Plugin",
+	"id": "link-color-plugin",
+	"name": "Link Colorer",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
+	"description": "Colorizes obsidian links in your notes to make them easy to differentiate.",
+	"author": "Pamela Wang",
+	"authorUrl": "https://github.com/Caffa",
 	"isDesktopOnly": false
 }
+
