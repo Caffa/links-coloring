@@ -250,11 +250,11 @@ function applyBandVariant(baseColor: string, bandIndex: number, isDarkMode: bool
 
     if (bandIndex === 1) {
         // vivid
-        hsl.s = Math.min(92, hsl.s + 10);
+        hsl.s = Math.min(90, hsl.s + 10);
         hsl.l = isDarkMode ? Math.min(90, hsl.l + 2) : Math.max(15, hsl.l - 2);
     } else if (bandIndex === 2) {
         // muted
-        hsl.s = Math.max(35, hsl.s - 12);
+        hsl.s = Math.max(32, hsl.s - 12);
         hsl.l = isDarkMode ? Math.min(92, hsl.l + 3) : Math.max(12, hsl.l - 3);
     }
 
@@ -289,7 +289,7 @@ function applyVariant(baseColor: string, variantSeed: number, shadeIndex: number
     const hsl = rgbToHsl(r, g, b);
 
     hsl.h = (hsl.h + hueShift + 360) % 360;
-    hsl.s = Math.max(35, Math.min(90, hsl.s + satDelta));
+    hsl.s = Math.max(38, Math.min(88, hsl.s + satDelta));
     hsl.l = Math.max(18, Math.min(88, hsl.l + lightDelta));
 
     const rgb = hslToRgb(hsl.h, hsl.s, hsl.l);
@@ -336,7 +336,7 @@ function generateShade(color: string, shadeIndex: number, isDarkMode: boolean): 
     // 2) Saturation: alternate up/down with small amplitude, grow with easing
     const satSign = (level % 2 === 0) ? -1 : 1;
     const deltaS = satSign * (6 + 6 * ease); // between ~6% and 12%
-    hsl.s = Math.max(18, Math.min(95, hsl.s + deltaS)); // keep vivid but avoid oversaturation/grey
+    hsl.s = Math.max(28, Math.min(92, hsl.s + deltaS)); // tightened to avoid near-grey and oversaturation
 
     // 3) Lightness: bounded total adjustment, not linear per step
     const lightSign = isDarkMode ? 1 : -1; // lighten in dark mode, darken in light mode
