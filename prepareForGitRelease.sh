@@ -5,7 +5,7 @@ npm version patch --no-git-tag-version
 mkdir -p link-colorer
 
 # make a copy of the main.js, manifest.json, and styles.css files in another folder
-cp dist/main.js link-colorer
+cp main.js link-colorer
 cp manifest.json link-colorer
 cp styles.css link-colorer
 # compress the current_release folder into a zip file
