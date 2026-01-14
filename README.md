@@ -2,6 +2,11 @@
 
 This is an Obsidian plugin that automatically colors your internal links based on their text content. It uses deterministic hashing to ensure that `[[Apple]]` appears in the exact same color every time you type it, helping you visually distinguish between different concepts, characters, or topics in your vault.
 
+<img width="1256" height="628" alt="14405" src="https://github.com/user-attachments/assets/5f30f169-3a4e-44a7-8896-c9c935e53b2c" />
+
+I use this for fiction writing since each character is a different link (I use various complements together with this)
+
+
 ## ✨ Features
 
 *   **Deterministic Coloring:** The color is derived mathematically from the link text. `[[Obsidian]]` will always be the same specific shade of purple, no matter where it appears.
