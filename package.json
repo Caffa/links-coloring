@@ -1,7 +1,7 @@
 {
   "name": "link-color-plugin",
   "version": "1.0.2",
-  "description": "This is a sample plugin for Obsidian (https://obsidian.md)",
+  "description": "Colorizes obsidian links in your notes to make them easy to differentiate.",
   "main": "main.js",
   "type": "module",
   "scripts": {
