@@ -169,18 +169,66 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
     const paletteObj = PALETTES[settings.palette] ?? PALETTES['vibrant']!;
     const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
 
-    const baseIndex = hash % colorList.length;
-    const baseColor = colorList[baseIndex]!;
+    const paletteSize = colorList.length;
+    const goldenStep = Math.max(1, Math.round(paletteSize * 0.382));
+
+    // Probe a few candidate indices and pick the least used to spread load
+    const candidates = [
+        hash % paletteSize,
+        (hash + goldenStep) % paletteSize,
+        (hash + 2 * goldenStep) % paletteSize,
+    ];
+
+    let baseIndex = candidates[0];
+    let minUse = Number.MAX_SAFE_INTEGER;
+    for (const idx of candidates) {
+        const key = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${idx}`;
+        const use = colorUsageMap.get(key) || 0;
+        if (use < minUse) {
+            minUse = use;
+            baseIndex = idx;
+        }
+    }
+
+    let baseColor = colorList[baseIndex]!;
 
     // 6. Variant seed: derive a secondary hash to diversify within the same base color
     const variantSeed = djb2Hash(cleaned + '|v');
 
-    // 7. Track color usage and generate shades if needed
-    const colorKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${baseIndex}`;
-    const usageCount = colorUsageMap.get(colorKey) || 0;
+    // 7. Track usage and cap variants per base; if exceeded, hop to a new base
+    let colorKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${baseIndex}`;
+    let usageCount = colorUsageMap.get(colorKey) || 0;
 
-    // 8. Apply variant based on seed plus a small shade wobble from usageCount
-    const finalColor = applyVariant(baseColor, variantSeed, usageCount, isDarkMode);
+    const MAX_VARIANTS_PER_BASE = 6;
+    if (usageCount >= MAX_VARIANTS_PER_BASE) {
+        // Move to a different base using golden step and pick the least used among a few probes
+        const probes = [
+            (baseIndex + goldenStep) % paletteSize,
+            (baseIndex + 2 * goldenStep) % paletteSize,
+            (baseIndex + 3 * goldenStep) % paletteSize,
+        ];
+        let best = probes[0];
+        let bestUse = Number.MAX_SAFE_INTEGER;
+        for (const idx of probes) {
+            const k = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${idx}`;
+            const u = colorUsageMap.get(k) || 0;
+            if (u < bestUse) {
+                bestUse = u;
+                best = idx;
+            }
+        }
+        baseIndex = best;
+        baseColor = colorList[baseIndex]!;
+        colorKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${baseIndex}`;
+        usageCount = colorUsageMap.get(colorKey) || 0;
+    }
+
+    // 8. Apply a stratification band before the variant to expand the effective palette
+    const bandIndex = (variantSeed % 3 + 3) % 3; // 0..2
+    const bandedBase = applyBandVariant(baseColor, bandIndex, isDarkMode);
+
+    // 9. Apply variant based on seed plus a small shade wobble from usageCount
+    const finalColor = applyVariant(bandedBase, variantSeed, usageCount, isDarkMode);
 
     // Update usage count for this base color
     colorUsageMap.set(colorKey, usageCount + 1);
@@ -192,6 +240,28 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
 }
 
 // Apply an intra-base variant using a secondary seed and a small shade wobble
+function applyBandVariant(baseColor: string, bandIndex: number, isDarkMode: boolean): string {
+    // Bands: 0 = normal, 1 = vivid, 2 = muted
+    const hex = baseColor.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    const hsl = rgbToHsl(r, g, b);
+
+    if (bandIndex === 1) {
+        // vivid
+        hsl.s = Math.min(92, hsl.s + 10);
+        hsl.l = isDarkMode ? Math.min(90, hsl.l + 2) : Math.max(15, hsl.l - 2);
+    } else if (bandIndex === 2) {
+        // muted
+        hsl.s = Math.max(35, hsl.s - 12);
+        hsl.l = isDarkMode ? Math.min(92, hsl.l + 3) : Math.max(12, hsl.l - 3);
+    }
+
+    const out = hslToRgb(hsl.h, hsl.s, hsl.l);
+    return rgbToHex(out.r, out.g, out.b);
+}
+
 function applyVariant(baseColor: string, variantSeed: number, shadeIndex: number, isDarkMode: boolean): string {
     // Seed decomposition for deterministic tweaks
     const rand = (n: number) => Math.abs(((variantSeed >> n) ^ (variantSeed << (n % 13))) & 0xffff) / 0xffff;
