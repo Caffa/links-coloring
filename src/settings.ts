@@ -99,12 +99,14 @@ export interface LinkColorSettings {
     palette: PaletteType;
     ignorePrefix: boolean;
     hashMode: HashMode;
+    underlineVariants: boolean; // optional visual differentiator
 }
 
 export const DEFAULT_SETTINGS: LinkColorSettings = {
     palette: 'vibrant',
     ignorePrefix: true,
-    hashMode: 'strict-full'
+    hashMode: 'strict-full',
+    underlineVariants: false,
 }
 
 export const HASH_MODE_DESCRIPTIONS: Record<HashMode, { name: string; description: string }> = {
@@ -178,6 +180,16 @@ export class LinkColorSettingTab extends PluginSettingTab {
                         await this.plugin.saveSettings();
                     });
             });
+
+        new Setting(containerEl)
+            .setName('Underline variation')
+            .setDesc('Adds subtle underline style variations to increase distinctness (optional).')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.underlineVariants)
+                .onChange(async (value) => {
+                    this.plugin.settings.underlineVariants = value;
+                    await this.plugin.saveSettings();
+                }));
 
         const modeDesc = HASH_MODE_DESCRIPTIONS[this.plugin.settings.hashMode];
         const descEl = containerEl.createEl('p', { text: modeDesc.description });

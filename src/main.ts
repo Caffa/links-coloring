@@ -100,7 +100,7 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
                                             node.from,
                                             node.to,
                                             Decoration.mark({
-                                                attributes: { style: generateStyleString(dynColor) },
+                                                attributes: { style: generateStyleString(dynColor, plugin.settings) },
                                                 class: "consistent-link-target"
                                             })
                                         );
@@ -110,7 +110,7 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
                                                 node.from,
                                                 node.to,
                                                 Decoration.mark({
-                                                    attributes: { style: generateStyleString(targetColor) },
+                                                    attributes: { style: generateStyleString(targetColor, plugin.settings) },
                                                     class: "consistent-link-alias"
                                                 })
                                             );
@@ -511,13 +511,24 @@ function djb2Hash(seed: string): number {
     return Math.abs(hash);
 }
 
-function generateStyleString(color: string) {
+function generateStyleString(color: string, settings: LinkColorSettings) {
+    // Optional underline variants for additional distinctness
+    let underline = '';
+    if (settings.underlineVariants) {
+        const seed = djb2Hash(color);
+        const style = ['solid', 'dashed', 'dotted'][seed % 3];
+        const thickness = 1 + (seed % 2); // 1..2
+        const offset = 2 + (seed % 2); // 2..3
+        underline = `text-decoration: underline; text-decoration-style: ${style}; text-decoration-thickness: ${thickness}px; text-underline-offset: ${offset}px;`;
+    }
+
     return `
         color: ${color} !important;
         -webkit-text-fill-color: ${color} !important;
         --link-color: ${color} !important;
         --link-external-color: ${color} !important;
         font-weight: bold;
+        ${underline}
     `;
 }
 
