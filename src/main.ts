@@ -11,7 +11,9 @@ import { syntaxTree } from '@codemirror/language';
 
 import { LinkColorSettings, DEFAULT_SETTINGS, LinkColorSettingTab, PALETTES, HashMode } from './settings';
 
-// Global color usage tracker to enable shade variations
+// Global text-to-color mapping to ensure consistent shading per text
+const textColorMap = new Map<string, string>();
+// Track how many times each base color has been used (for shade generation)
 const colorUsageMap = new Map<string, number>();
 
 export default class LinkColorPlugin extends Plugin {
@@ -140,7 +142,13 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
     // 2. Prepare Data (LowerCase)
     const cleaned = text.trim().toLowerCase();
 
-    // 3. Generate hash based on selected mode
+    // 3. Check if we've already assigned a color to this specific text
+    const textKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${cleaned}`;
+    if (textColorMap.has(textKey)) {
+        return textColorMap.get(textKey)!;
+    }
+
+    // 4. Generate hash based on selected mode
     let hash: number;
 
     switch (settings.hashMode) {
@@ -157,26 +165,33 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
             hash = hashStrictFull(cleaned);
     }
 
-    // 4. Select Palette and Pick Color
+    // 5. Select Palette and Pick Color
     const paletteObj = PALETTES[settings.palette] ?? PALETTES['vibrant']!;
     const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
 
     const baseIndex = hash % colorList.length;
     const baseColor = colorList[baseIndex]!;
 
-    // 5. Track color usage and generate shades if needed
+    // 6. Track color usage and generate shades if needed
     const colorKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${baseIndex}`;
     const usageCount = colorUsageMap.get(colorKey) || 0;
 
-    // If this color has been used before, generate a shade variation
+    let finalColor: string;
+
+    // If this base color has been used before, generate a shade variation
     if (usageCount > 0) {
-        const shadeVariation = generateShade(baseColor, usageCount, isDarkMode);
-        colorUsageMap.set(colorKey, usageCount + 1);
-        return shadeVariation;
+        finalColor = generateShade(baseColor, usageCount, isDarkMode);
+    } else {
+        finalColor = baseColor;
     }
 
+    // Update usage count for this base color
     colorUsageMap.set(colorKey, usageCount + 1);
-    return baseColor;
+
+    // Store the color for this specific text so it's consistent across all encounters
+    textColorMap.set(textKey, finalColor);
+
+    return finalColor;
 }
 
 /**
