@@ -138,7 +138,7 @@ export class LinkColorSettingTab extends PluginSettingTab {
         containerEl.empty();
 
         new Setting(containerEl)
-            .setName('Color Palette')
+            .setName('Color palette')
             .setDesc('Choose a predefined color scheme.')
             .addDropdown(dropdown => {
                 Object.keys(PALETTES).forEach((key) => {
@@ -155,8 +155,8 @@ export class LinkColorSettingTab extends PluginSettingTab {
             });
 
         new Setting(containerEl)
-            .setName('Ignore Prefixes')
-            .setDesc('When enabled, "Char - Charlus" will be colored based on "Charlus" only.')
+            .setName('Ignore prefixes')
+            .setDesc('When enabled, "Char - Pamela" will be colored based on "Pamela" only.')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.ignorePrefix)
                 .onChange(async (value) => {
@@ -165,7 +165,7 @@ export class LinkColorSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Hash Mode')
+            .setName('Hash mode')
             .setDesc('Choose how words are hashed to colors.')
             .addDropdown(dropdown => {
                 const modes: HashMode[] = ['strict-full', 'strict-acronym', 'similarity'];
