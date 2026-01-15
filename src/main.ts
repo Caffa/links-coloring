@@ -78,7 +78,6 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
                             if (type.includes("formatting-link-start")) {
                                 const charBefore = node.from > 0 ? view.state.sliceDoc(node.from - 1, node.from) : "";
 
-                                // Fix: Check both the character before AND if the token itself starts with '!'
                                 // This covers cases where "![[" is parsed as a single token.
                                 isEmbed = charBefore === "!" || text.startsWith("!");
 
@@ -90,7 +89,6 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
                             }
 
                             // 2. Detect Link End
-                            // Fix: Explicitly check for "]]" to ensure we close the link state even if the
                             // token type is unexpected (e.g., inside an embed block).
                             if (type.includes("formatting-link-end") || text === "]]") {
                                 inLink = false;
@@ -160,105 +158,110 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
         if (namePart) text = namePart.trim();
     }
 
-    // 2. Prepare Data (LowerCase)
+    // 2. Prepare Data
     const cleaned = text.trim().toLowerCase();
 
-    // 3. Check if we've already assigned a color to this specific text
+    // 3. Check Cache
     const textKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${cleaned}`;
     if (textColorMap.has(textKey)) {
         return textColorMap.get(textKey)!;
     }
 
-    // 4. Generate hash based on selected mode
+    // 4. Generate Hashes
     let hash: number;
-
     switch (settings.hashMode) {
-        case 'strict-full':
-            hash = hashStrictFull(cleaned);
-            break;
-        case 'strict-acronym':
-            hash = hashStrictAcronym(cleaned);
-            break;
-        case 'similarity':
-            hash = hashSimilarity(cleaned);
-            break;
-        default:
-            hash = hashStrictFull(cleaned);
+        case 'strict-full': hash = hashStrictFull(cleaned); break;
+        case 'strict-acronym': hash = hashStrictAcronym(cleaned); break;
+        case 'similarity': hash = hashSimilarity(cleaned); break;
+        default: hash = hashStrictFull(cleaned);
     }
 
-    // 5. Select Palette and Pick Color
+    // 5. Select Palette
     const paletteObj = PALETTES[settings.palette] ?? PALETTES['vibrant']!;
     const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
-
     const paletteSize = colorList.length;
-    const goldenStep = Math.max(1, Math.round(paletteSize * 0.382));
 
-    // Probe a few candidate indices and pick the least used to spread load
-    const candidates = [
-        hash % paletteSize,
-        (hash + goldenStep) % paletteSize,
-        (hash + 2 * goldenStep) % paletteSize,
-    ];
+    // --- FIX 1: GLOBAL LOAD BALANCING ---
+    // Instead of checking 3 spots, scan the WHOLE palette to find the absolute least used color.
+    // If there is a tie, use the hash to deterministically break it.
 
-    let baseIndex: number = candidates[0]!;
-    let minUse = Number.MAX_SAFE_INTEGER;
-    for (const idx of candidates) {
+    let bestIndex = -1;
+    let minUsage = Number.MAX_SAFE_INTEGER;
+
+    // We create a randomized start point based on hash so we don't always fill index 0 first
+    const startOffset = hash % paletteSize;
+
+    for (let i = 0; i < paletteSize; i++) {
+        // Wrap around array
+        const idx = (startOffset + i) % paletteSize;
         const key = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${idx}`;
-        const use = colorUsageMap.get(key) || 0;
-        if (use < minUse) {
-            minUse = use;
-            baseIndex = idx;
+        const usage = colorUsageMap.get(key) || 0;
+
+        if (usage < minUsage) {
+            minUsage = usage;
+            bestIndex = idx;
         }
     }
 
-    let baseColor = colorList[baseIndex]!;
+    // 6. Register Usage
+    const selectedKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${bestIndex}`;
+    const currentUsageCount = colorUsageMap.get(selectedKey) || 0;
+    colorUsageMap.set(selectedKey, currentUsageCount + 1);
 
-    // 6. Variant seed: derive a secondary hash to diversify within the same base color
+    const baseColor = colorList[bestIndex]!;
+
+    // 7. Variant Seed
     const variantSeed = djb2Hash(cleaned + '|v');
 
-    // 7. Track usage and cap variants per base; if exceeded, hop to a new base
-    let colorKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${baseIndex}`;
-    let usageCount = colorUsageMap.get(colorKey) || 0;
+    // 8. Apply Aggressive Variant
+    // We pass 'currentUsageCount' to force distinctness when a color is reused
+    const finalColor = applyAggressiveVariant(baseColor, variantSeed, currentUsageCount, isDarkMode);
 
-    const MAX_VARIANTS_PER_BASE = 6;
-    if (usageCount >= MAX_VARIANTS_PER_BASE) {
-        // Move to a different base using golden step and pick the least used among a few probes
-        const safeBaseIndex = typeof baseIndex === 'number' ? baseIndex : 0;
-        const probes = [
-            (safeBaseIndex + goldenStep) % paletteSize,
-            (safeBaseIndex + 2 * goldenStep) % paletteSize,
-            (safeBaseIndex + 3 * goldenStep) % paletteSize,
-        ];
-        let best: number = probes[0]!;
-        let bestUse = Number.MAX_SAFE_INTEGER;
-        for (const idx of probes) {
-            const k = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${idx}`;
-            const u = colorUsageMap.get(k) || 0;
-            if (u < bestUse) {
-                bestUse = u;
-                best = idx;
-            }
-        }
-        baseIndex = best;
-        baseColor = colorList[baseIndex]!;
-        colorKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${baseIndex}`;
-        usageCount = colorUsageMap.get(colorKey) || 0;
-    }
-
-    // 8. Apply a stratification band before the variant to expand the effective palette
-    const bandIndex = (variantSeed % 3 + 3) % 3; // 0..2
-    const bandedBase = applyBandVariant(baseColor, bandIndex, isDarkMode);
-
-    // 9. Apply variant based on seed plus a small shade wobble from usageCount
-    const finalColor = applyVariant(bandedBase, variantSeed, usageCount, isDarkMode);
-
-    // Update usage count for this base color
-    colorUsageMap.set(colorKey, usageCount + 1);
-
-    // Store the color for this specific text so it's consistent across all encounters
     textColorMap.set(textKey, finalColor);
-
     return finalColor;
+}
+
+function applyAggressiveVariant(baseColor: string, variantSeed: number, usageCount: number, isDarkMode: boolean): string {
+    const hex = baseColor.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    const hsl = rgbToHsl(r, g, b);
+
+    // Seed Random generator
+    const rand = (n: number) => Math.abs(((variantSeed >> n) ^ (variantSeed << (n % 13))) & 0xffff) / 0xffff;
+
+    // --- FIX 2: USAGE BASED SPREAD ---
+    // If this is the 1st time using this base color: almost no shift.
+    // 2nd time: shift Left. 3rd time: shift Right. 4th: shift Left more.
+    // This creates a "fan" effect around the base color.
+    const spreadDirection = usageCount % 2 === 0 ? 1 : -1;
+    const spreadMagnitude = Math.ceil(usageCount / 2) * 15; // 15, 30, 45 degree jumps per usage
+
+    // Random noise (kept smaller to preserve the "Base" color identity slightly)
+    const randomHueNoise = (rand(3) - 0.5) * 20; // +/- 10 degrees random wobble
+
+    // Total Hue Shift
+    // We limit spreadMagnitude to ~60 to prevent complete color crossovers (e.g. Red becoming Blue)
+    const effectiveSpread = Math.min(spreadMagnitude, 60) * spreadDirection;
+    hsl.h = (hsl.h + effectiveSpread + randomHueNoise + 360) % 360;
+
+    // --- FIX 3: SATURATION/LIGHTNESS VARIANCE ---
+    // Dark mode needs high Lightness to be readable. Light mode needs low Lightness.
+
+    // Saturation: 60% to 95% range (High saturation is distinct)
+    const satNoise = (rand(5) - 0.5) * 30; // +/- 15%
+    hsl.s = Math.max(50, Math.min(95, hsl.s + satNoise));
+
+    // Lightness: Ensure contrast but allow variance
+    // Dark Mode: Range 65% - 85%
+    // Light Mode: Range 25% - 45%
+    const lightTarget = isDarkMode ? 75 : 35;
+    const lightNoise = (rand(7) - 0.5) * 20; // +/- 10%
+    hsl.l = Math.max(isDarkMode ? 60 : 20, Math.min(isDarkMode ? 90 : 50, lightTarget + lightNoise));
+
+    const out = hslToRgb(hsl.h, hsl.s, hsl.l);
+    return rgbToHex(out.r, out.g, out.b);
 }
 
 // Apply an intra-base variant using a secondary seed and a small shade wobble
