@@ -35,59 +35,16 @@ export const PALETTES: Record<string, { dark: string[], light: string[] }> = {
         dark: ["#BF616A", "#8FBCBB", "#B48EAD", "#EBCB8B", "#A3BE8C", "#88C0D0", "#D08770", "#5E81AC"],
         light: ["#BF616A", "#5E81AC", "#B48EAD", "#D08770", "#A3BE8C", "#88C0D0", "#CBA040", "#81A1C1"]
     },
-
-     extended: {
+    extended: {
         dark: [
-            "#FF8A80", // Red
-            "#FF5252", // Red Accent
-            "#FF9E80", // Deep Orange
-            "#FFD180", // Orange
-            "#FFE57F", // Amber
-            "#FFFF8D", // Yellow
-            "#CCFF90", // Light Green
-            "#A7FFEB", // Teal Accent
-            "#80D8FF", // Light Blue
-            "#82B1FF", // Blue
-            "#B388FF", // Deep Purple
-            "#EA80FC", // Purple Accent
-            "#FF80AB", // Pink
-            "#CFD8DC", // Blue Grey
-            "#FFD740", // Amber Accent
-            "#69F0AE", // Green Accent
-            "#40C4FF", // Light Blue Accent
-            "#7C4DFF", // Deep Purple Accent
-            "#FF4081", // Pink Accent
-            "#E040FB", // Purple
-            "#18FFFF", // Cyan
-            "#64FFDA", // Teal
-            "#EEFF41", // Lime
-            "#F4FF81"  // Light Lime
+            "#FF8A80", "#FF5252", "#FF9E80", "#FFD180", "#FFE57F", "#FFFF8D", "#CCFF90", "#A7FFEB",
+            "#80D8FF", "#82B1FF", "#B388FF", "#EA80FC", "#FF80AB", "#CFD8DC", "#FFD740", "#69F0AE",
+            "#40C4FF", "#7C4DFF", "#FF4081", "#E040FB", "#18FFFF", "#64FFDA", "#EEFF41", "#F4FF81"
         ],
         light: [
-            "#B71C1C", // Red
-            "#C62828", // Red Dark
-            "#BF360C", // Deep Orange
-            "#E65100", // Orange
-            "#FF6F00", // Amber
-            "#F57F17", // Yellow (Darkened)
-            "#33691E", // Light Green (Darkened)
-            "#004D40", // Teal
-            "#01579B", // Light Blue
-            "#0D47A1", // Blue
-            "#311B92", // Deep Purple
-            "#4A148C", // Purple
-            "#880E4F", // Pink
-            "#455A64", // Blue Grey
-            "#FF6D00", // Amber Accent
-            "#00C853", // Green
-            "#0091EA", // Light Blue
-            "#6200EA", // Deep Purple
-            "#C51162", // Pink
-            "#AA00FF", // Purple Accent
-            "#00B8D4", // Cyan
-            "#00BFA5", // Teal Accent
-            "#AEEA00", // Lime
-            "#827717"  // Lime Dark
+            "#B71C1C", "#C62828", "#BF360C", "#E65100", "#FF6F00", "#F57F17", "#33691E", "#004D40",
+            "#01579B", "#0D47A1", "#311B92", "#4A148C", "#880E4F", "#455A64", "#FF6D00", "#00C853",
+            "#0091EA", "#6200EA", "#C51162", "#AA00FF", "#00B8D4", "#00BFA5", "#AEEA00", "#827717"
         ]
     }
 };
@@ -99,7 +56,7 @@ export interface LinkColorSettings {
     palette: PaletteType;
     ignorePrefix: boolean;
     hashMode: HashMode;
-    underlineVariants: boolean; // optional visual differentiator
+    underlineVariants: boolean;
 }
 
 export const DEFAULT_SETTINGS: LinkColorSettings = {
@@ -137,6 +94,9 @@ export class LinkColorSettingTab extends PluginSettingTab {
         const { containerEl } = this;
         containerEl.empty();
 
+        // --- GROUP 1: VISUAL STYLE ---
+        containerEl.createEl('h3', { text: 'Visual Style' });
+
         new Setting(containerEl)
             .setName('Color palette')
             .setDesc('Choose a predefined color scheme.')
@@ -155,35 +115,8 @@ export class LinkColorSettingTab extends PluginSettingTab {
             });
 
         new Setting(containerEl)
-            .setName('Ignore prefixes')
-            .setDesc('When enabled, "Char - Pamela" will be colored based on "Pamela" only.')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.ignorePrefix)
-                .onChange(async (value) => {
-                    this.plugin.settings.ignorePrefix = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Hash mode')
-            .setDesc('Choose how words are hashed to colors.')
-            .addDropdown(dropdown => {
-                const modes: HashMode[] = ['strict-full', 'strict-acronym', 'similarity'];
-                modes.forEach((mode) => {
-                    const desc = HASH_MODE_DESCRIPTIONS[mode];
-                    dropdown.addOption(mode, desc.name);
-                });
-                dropdown
-                    .setValue(this.plugin.settings.hashMode)
-                    .onChange(async (value) => {
-                        this.plugin.settings.hashMode = value as HashMode;
-                        await this.plugin.saveSettings();
-                    });
-            });
-
-        new Setting(containerEl)
             .setName('Underline variation')
-            .setDesc('Adds subtle underline style variations to increase distinctness (optional).')
+            .setDesc('Adds subtle underline style variations to increase distinctness.')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.underlineVariants)
                 .onChange(async (value) => {
@@ -191,29 +124,56 @@ export class LinkColorSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
-        const modeDesc = HASH_MODE_DESCRIPTIONS[this.plugin.settings.hashMode];
-        const descEl = containerEl.createEl('p', { text: modeDesc.description });
-        descEl.style.fontSize = '0.9em';
-        descEl.style.color = 'var(--text-muted)';
-        descEl.style.marginTop = '-10px';
-        descEl.style.marginBottom = '20px';
-
-        containerEl.createEl('h3', { text: 'Preview' });
-        this.previewEl = containerEl.createDiv();
-        this.previewEl.style.display = 'flex';
-        this.previewEl.style.flexWrap = 'wrap';
-        this.previewEl.style.gap = '10px';
-        this.previewEl.style.marginTop = '10px';
-        this.previewEl.style.padding = '15px';
-        this.previewEl.style.borderRadius = '8px';
-        this.previewEl.style.backgroundColor = 'var(--background-secondary)';
-
+        // Preview Area (Grouped with Visual Style)
+        this.previewEl = containerEl.createDiv({ cls: 'link-color-preview-container' });
         this.updatePreview();
+
+        // --- GROUP 2: MATCHING LOGIC ---
+        containerEl.createEl('h3', { text: 'Matching Logic', cls: 'link-color-section-header' });
+
+        // Placehold for the description element so we can update it dynamically
+        let descEl: HTMLElement;
+
+        new Setting(containerEl)
+            .setName('Hash mode')
+            .setDesc('Choose how words are converted into colors.')
+            .addDropdown(dropdown => {
+                const modes: HashMode[] = ['strict-full', 'strict-acronym', 'similarity'];
+                modes.forEach((mode) => {
+                    dropdown.addOption(mode, HASH_MODE_DESCRIPTIONS[mode].name);
+                });
+                dropdown
+                    .setValue(this.plugin.settings.hashMode)
+                    .onChange(async (value) => {
+                        this.plugin.settings.hashMode = value as HashMode;
+                        // Update description text immediately
+                        if (descEl) descEl.textContent = HASH_MODE_DESCRIPTIONS[this.plugin.settings.hashMode].description;
+                        await this.plugin.saveSettings();
+                    });
+            });
+
+        // The Description Text (Placed immediately after Hash Mode)
+        descEl = containerEl.createDiv({
+            text: HASH_MODE_DESCRIPTIONS[this.plugin.settings.hashMode].description,
+            cls: 'link-color-mode-description'
+        });
+
+        new Setting(containerEl)
+            .setName('Ignore prefixes')
+            .setDesc('If enabled, "Char - Pamela" is colored based on "Pamela" only.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.ignorePrefix)
+                .onChange(async (value) => {
+                    this.plugin.settings.ignorePrefix = value;
+                    await this.plugin.saveSettings();
+                }));
     }
 
     updatePreview() {
         this.previewEl.empty();
         const currentPalette = this.plugin.settings.palette;
+
+        // Check for dark mode via body class
         const isDarkMode = document.body.classList.contains('theme-dark');
 
         const palette = PALETTES[currentPalette] || PALETTES['vibrant'];
@@ -222,13 +182,9 @@ export class LinkColorSettingTab extends PluginSettingTab {
         const colors = isDarkMode ? palette.dark : palette.light;
 
         colors.forEach(color => {
-            const box = this.previewEl.createDiv();
-            box.style.width = '35px';
-            box.style.height = '35px';
+            const box = this.previewEl.createDiv({ cls: 'link-color-preview-box' });
+            // Background color is dynamic, so it stays inline
             box.style.backgroundColor = color;
-            box.style.borderRadius = '50%';
-            box.style.border = '2px solid var(--background-modifier-border)';
-            box.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)';
             box.title = color;
         });
     }

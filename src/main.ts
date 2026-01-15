@@ -552,7 +552,6 @@ function generateStyleString(color: string, settings: LinkColorSettings) {
         -webkit-text-fill-color: ${color} !important;
         --link-color: ${color} !important;
         --link-external-color: ${color} !important;
-        font-weight: bold;
         ${underline}
     `;
 }
