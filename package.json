@@ -1,6 +1,6 @@
 {
   "name": "link-colorer",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "description": "Colorizes obsidian links in your notes to make them easy to differentiate.",
   "main": "main.js",
   "type": "module",

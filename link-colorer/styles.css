@@ -1,8 +1,35 @@
-/*
+/* Header spacing for the "Matching Logic" section */
+.link-color-section-header {
+    margin-top: 20px;
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+/* Description text that appears under the Hash Mode dropdown */
+.link-color-mode-description {
+    font-size: 0.9em;
+    color: var(--text-muted);
+    margin-top: -10px; /* Pulls it closer to the setting above */
+    margin-bottom: 20px;
+    padding-left: 10px; /* Optional: align with setting text visually */
+}
 
-If your plugin does not need CSS, delete this file.
+/* The container for the color palette preview */
+.link-color-preview-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 10px;
+    margin-bottom: 10px;
+    padding: 15px;
+    border-radius: 8px;
+    background-color: var(--background-secondary);
+}
 
-*/
+/* The individual color circles */
+.link-color-preview-box {
+    width: 35px;
+    height: 35px;
+    border-radius: 50%;
+    border: 2px solid var(--background-modifier-border);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
