@@ -107,7 +107,15 @@ Here is how the algorithm differentiates between two nearly identical inputs: **
 
 *Even though the strings share 99% of the same characters, the **Length-Weighted Seed** ensures they land on opposite sides of the color palette.*
 
+## ☕ Support This Project
+
+If you find Link Colorer useful, I'd truly appreciate your support. Please consider buying me a coffee on [Ko-fi](https://ko-fi.com/pamelawang_mwahacookie). If not, I would really appreciate color palettes for the project.
+
+Thank you. Happy writing and organizing your brilliant ideas!
+
 ## 📄 License
 
 [MIT](LICENSE)
+
+ko
 
