@@ -546,22 +546,11 @@ function djb2Hash(str: string, seed: number = 5381): number {
 }
 
 function generateStyleString(color: string, settings: LinkColorSettings) {
-    // Optional underline variants for additional distinctness
-    let underline = '';
-    if (settings.underlineVariants) {
-        const seed = djb2Hash(color);
-        const style = ['solid', 'dashed', 'dotted'][seed % 3];
-        const thickness = 1 + (seed % 2); // 1..2
-        const offset = 2 + (seed % 2); // 2..3
-        underline = `text-decoration: underline; text-decoration-style: ${style}; text-decoration-thickness: ${thickness}px; text-underline-offset: ${offset}px;`;
-    }
-
     return `
         color: ${color} !important;
         -webkit-text-fill-color: ${color} !important;
         --link-color: ${color} !important;
         --link-external-color: ${color} !important;
-        ${underline}
     `;
 }
 

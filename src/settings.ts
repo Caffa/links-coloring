@@ -81,7 +81,6 @@ export interface LinkColorSettings {
     palette: PaletteType;
     ignorePrefix: boolean;
     hashMode: HashMode;
-    underlineVariants: boolean;
     customSeed: number; // New setting for the hash seed
 }
 
@@ -89,7 +88,6 @@ export const DEFAULT_SETTINGS: LinkColorSettings = {
     palette: 'vibrant',
     ignorePrefix: true,
     hashMode: 'strict-full',
-    underlineVariants: false,
     customSeed: 5381, // Default DJB2 seed
 }
 
@@ -145,15 +143,6 @@ export class LinkColorSettingTab extends PluginSettingTab {
                     });
             });
 
-        new Setting(containerEl)
-            .setName('Underline variation')
-            .setDesc('Adds subtle underline style variations to increase distinctness.')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.underlineVariants)
-                .onChange(async (value) => {
-                    this.plugin.settings.underlineVariants = value;
-                    await this.plugin.saveSettings();
-                }));
 
         // Preview Area
         this.previewEl = containerEl.createDiv({ cls: 'link-color-preview-container' });
