@@ -168,12 +168,15 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
     }
 
     // 4. Generate Hashes
+    const seed = settings.customSeed; // <--- GET SEED FROM SETTINGS
     let hash: number;
+
     switch (settings.hashMode) {
-        case 'strict-full': hash = hashStrictFull(cleaned); break;
-        case 'strict-acronym': hash = hashStrictAcronym(cleaned); break;
-        case 'similarity': hash = hashSimilarity(cleaned); break;
-        default: hash = hashStrictFull(cleaned);
+        case 'strict-full': hash = hashStrictFull(cleaned, seed); break;
+        case 'strict-acronym': hash = hashStrictAcronym(cleaned, seed); break;
+        case 'strict-first-last': hash = hashStrictFirstLast(cleaned, seed); break;
+        case 'similarity': hash = hashSimilarity(cleaned, seed); break;
+        default: hash = hashStrictFull(cleaned, seed);
     }
 
     // 5. Select Palette
@@ -211,7 +214,7 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
     const baseColor = colorList[bestIndex]!;
 
     // 7. Variant Seed
-    const variantSeed = djb2Hash(cleaned + '|v');
+    const variantSeed = djb2Hash(cleaned + '|v', seed);
 
     // 8. Apply Aggressive Variant
     // We pass 'currentUsageCount' to force distinctness when a color is reused
@@ -464,11 +467,11 @@ function rgbToHex(r: number, g: number, b: number): string {
  * Strict Full Hash: Maximum uniqueness using acronyms, full text, and length.
  * Example: "Data Science" -> "ds" + "data science" + "12"
  */
-function hashStrictFull(text: string): number {
+function hashStrictFull(text: string, seed: number): number {
     const words = text.split(/\s+/).filter(Boolean);
     const acronyms = words.map(word => word.charAt(0)).join('');
-    const seed = acronyms + text + text.length.toString();
-    return djb2Hash(seed);
+    const str = acronyms + text + text.length.toString();
+    return djb2Hash(str, seed);
 }
 
 /**
@@ -476,10 +479,24 @@ function hashStrictFull(text: string): number {
  * Similar structure words may share colors.
  * Example: "Data Science" -> "ds", "Design System" -> "ds" (same color)
  */
-function hashStrictAcronym(text: string): number {
+function hashStrictAcronym(text: string, seed: number): number {
     const words = text.split(/\s+/).filter(Boolean);
     const acronyms = words.map(word => word.charAt(0)).join('');
-    return djb2Hash(acronyms);
+    return djb2Hash(acronyms, seed);
+}
+
+/**
+ * Strict First-Last Hash: Uses the first and last letters of every word.
+ * Example: "Data Science" -> "D" + "a" + "S" + "e" -> "DaSe"
+ */
+function hashStrictFirstLast(text: string, seed: number): number {
+    const words = text.split(/\s+/).filter(Boolean);
+    const signature = words.map(word => {
+        if (word.length === 0) return "";
+        if (word.length === 1) return word + word;
+        return word.charAt(0) + word.charAt(word.length - 1);
+    }).join('');
+    return djb2Hash(signature, seed);
 }
 
 /**
@@ -490,24 +507,16 @@ function hashStrictAcronym(text: string): number {
  * Words sharing many bigrams will hash to nearby values, ensuring similar words
  * get similar colors.
  */
-function hashSimilarity(text: string): number {
-    // Extract bigrams (2-character sequences) from the text
+function hashSimilarity(text: string, seed: number): number {
     const bigrams = extractBigrams(text);
+    if (bigrams.length === 0) return djb2Hash(text, seed);
 
-    if (bigrams.length === 0) {
-        // Fallback for very short words
-        return djb2Hash(text);
-    }
-
-    // Hash the bigrams to create a similarity-based hash
-    // This naturally groups similar words together
-    let hash = 5381;
+    let hash = seed; // Use the seed
     for (const bigram of bigrams) {
         hash = ((hash << 5) + hash) + bigram.charCodeAt(0);
         hash = ((hash << 5) + hash) + bigram.charCodeAt(1);
         hash = hash & hash;
     }
-
     return Math.abs(hash);
 }
 
@@ -527,10 +536,10 @@ function extractBigrams(text: string): string[] {
  * DJB2 Hash Function: A widely used non-cryptographic hash function.
  * Known for excellent distribution and speed.
  */
-function djb2Hash(seed: string): number {
-    let hash = 5381;
-    for (let i = 0; i < seed.length; i++) {
-        hash = ((hash << 5) + hash) + seed.charCodeAt(i);
+function djb2Hash(str: string, seed: number = 5381): number {
+    let hash = seed; // Use the passed seed instead of hardcoded 5381
+    for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) + hash) + str.charCodeAt(i);
         hash = hash & hash;
     }
     return Math.abs(hash);
