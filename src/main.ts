@@ -161,14 +161,14 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
     // 2. Prepare Data
     const cleaned = text.trim().toLowerCase();
 
-    // 3. Check Cache
-    const textKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${cleaned}`;
+    // 4. Generate Hashes
+    const seed = settings.customSeed; // <--- GET SEED FROM SETTINGS
+
+    // 3. Check Cache (must include seed so changing seed invalidates cache)
+    const textKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${seed}-${cleaned}`;
     if (textColorMap.has(textKey)) {
         return textColorMap.get(textKey)!;
     }
-
-    // 4. Generate Hashes
-    const seed = settings.customSeed; // <--- GET SEED FROM SETTINGS
     let hash: number;
 
     switch (settings.hashMode) {
@@ -197,7 +197,7 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
     for (let i = 0; i < paletteSize; i++) {
         // Wrap around array
         const idx = (startOffset + i) % paletteSize;
-        const key = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${idx}`;
+        const key = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${seed}-${idx}`;
         const usage = colorUsageMap.get(key) || 0;
 
         if (usage < minUsage) {
@@ -207,7 +207,7 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
     }
 
     // 6. Register Usage
-    const selectedKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${bestIndex}`;
+    const selectedKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${seed}-${bestIndex}`;
     const currentUsageCount = colorUsageMap.get(selectedKey) || 0;
     colorUsageMap.set(selectedKey, currentUsageCount + 1);
 
