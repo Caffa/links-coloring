@@ -74,8 +74,8 @@ export const PALETTES: Record<string, { dark: string[], light: string[] }> = {
 };
 
 export type PaletteType = keyof typeof PALETTES;
-// Updated to include strict-first-last
-export type HashMode = 'strict-full' | 'strict-acronym' | 'strict-first-last' | 'similarity';
+// Updated to include all hash modes
+export type HashMode = 'strict-full' | 'strict-acronym' | 'strict-first-last' | 'strict-first-two-last-two' | 'vowel-consonant' | 'position-weighted' | 'word-boundary-ngrams' | 'length-middle' | 'similarity';
 
 export interface LinkColorSettings {
     palette: PaletteType;
@@ -103,6 +103,26 @@ export const HASH_MODE_DESCRIPTIONS: Record<HashMode, { name: string; descriptio
     'strict-first-last': {
         name: 'Strict (First & Last Letters)',
         description: 'Uses the first and last letters of every word (e.g. "Data Science" -> "DaSe").'
+    },
+    'strict-first-two-last-two': {
+        name: 'Strict (First 2 + Last 2)',
+        description: 'Uses first 2 and last 2 characters of each word. Better discrimination than first-last alone (e.g. "Data Science" -> "DataScce").'
+    },
+    'vowel-consonant': {
+        name: 'Vowel-Consonant Pattern',
+        description: 'Creates a pattern based on vowel/consonant positions. Each character becomes V or C, creating unique patterns.'
+    },
+    'position-weighted': {
+        name: 'Position-Weighted',
+        description: 'Characters weighted by position (edges weighted more). Better discrimination for words with similar starts/ends but different middles.'
+    },
+    'word-boundary-ngrams': {
+        name: 'Word Boundary N-grams',
+        description: 'Uses trigrams (3-char sequences) within words only, respecting word boundaries. Maintains word identity while providing good discrimination.'
+    },
+    'length-middle': {
+        name: 'Length + Middle Chars',
+        description: 'Combines word length with first, middle, and last characters. Excellent discrimination while being compact.'
     },
     'similarity': {
         name: 'Similarity-Based',
@@ -158,8 +178,18 @@ export class LinkColorSettingTab extends PluginSettingTab {
             .setName('Hash mode')
             .setDesc('Choose how words are converted into colors.')
             .addDropdown(dropdown => {
-                // Add all modes including the new one
-                const modes: HashMode[] = ['strict-full', 'strict-acronym', 'strict-first-last', 'similarity'];
+                // Add all modes including the new ones
+                const modes: HashMode[] = [
+                    'strict-full',
+                    'strict-acronym',
+                    'strict-first-last',
+                    'strict-first-two-last-two',
+                    'vowel-consonant',
+                    'position-weighted',
+                    'word-boundary-ngrams',
+                    'length-middle',
+                    'similarity'
+                ];
                 modes.forEach((mode) => {
                     dropdown.addOption(mode, HASH_MODE_DESCRIPTIONS[mode].name);
                 });

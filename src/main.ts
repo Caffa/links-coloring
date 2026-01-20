@@ -175,6 +175,11 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
         case 'strict-full': hash = hashStrictFull(cleaned, seed); break;
         case 'strict-acronym': hash = hashStrictAcronym(cleaned, seed); break;
         case 'strict-first-last': hash = hashStrictFirstLast(cleaned, seed); break;
+        case 'strict-first-two-last-two': hash = hashStrictFirstTwoLastTwo(cleaned, seed); break;
+        case 'vowel-consonant': hash = hashVowelConsonant(cleaned, seed); break;
+        case 'position-weighted': hash = hashPositionWeighted(cleaned, seed); break;
+        case 'word-boundary-ngrams': hash = hashWordBoundaryNgrams(cleaned, seed); break;
+        case 'length-middle': hash = hashLengthMiddle(cleaned, seed); break;
         case 'similarity': hash = hashSimilarity(cleaned, seed); break;
         default: hash = hashStrictFull(cleaned, seed);
     }
@@ -496,6 +501,136 @@ function hashStrictFirstLast(text: string, seed: number): number {
         if (word.length === 1) return word + word;
         return word.charAt(0) + word.charAt(word.length - 1);
     }).join('');
+    return djb2Hash(signature, seed);
+}
+
+/**
+ * Strict First-Two-Last-Two Hash: Uses first 2 and last 2 characters of each word.
+ * Provides better discrimination than first-last alone.
+ * Example: "Data Science" -> "Da" + "ta" + "Sc" + "ce" -> "DataScce"
+ */
+function hashStrictFirstTwoLastTwo(text: string, seed: number): number {
+    const words = text.split(/\s+/).filter(Boolean);
+    const signature = words.map(word => {
+        if (word.length === 0) return "";
+        if (word.length === 1) return word + word + word + word;
+        if (word.length === 2) return word + word;
+        if (word.length === 3) return word.substring(0, 2) + word.substring(1);
+        const firstTwo = word.substring(0, 2);
+        const lastTwo = word.substring(word.length - 2);
+        return firstTwo + lastTwo;
+    }).join('');
+    return djb2Hash(signature, seed);
+}
+
+/**
+ * Vowel-Consonant Pattern Hash: Creates a pattern based on vowel/consonant positions.
+ * Each character is mapped to 'V' (vowel) or 'C' (consonant), creating a unique pattern.
+ * Example: "Data" -> "CVCV", "Science" -> "CCVCCV"
+ */
+function hashVowelConsonant(text: string, seed: number): number {
+    const vowels = new Set(['a', 'e', 'i', 'o', 'u']);
+    const words = text.split(/\s+/).filter(Boolean);
+    const pattern = words.map(word => {
+        return Array.from(word).map(char => vowels.has(char) ? 'V' : 'C').join('');
+    }).join('|');
+    // Also include word lengths for extra discrimination
+    const lengthInfo = words.map(w => w.length.toString()).join(',');
+    return djb2Hash(pattern + ':' + lengthInfo, seed);
+}
+
+/**
+ * Position-Weighted Hash: Characters are weighted by their position in the word.
+ * Edge characters (first/last) have higher weight, middle characters have lower weight.
+ * This creates better discrimination for words with similar starts/ends but different middles.
+ * Example: "Data" -> weighted sum of 'D'(4) + 'a'(1) + 't'(1) + 'a'(4)
+ */
+function hashPositionWeighted(text: string, seed: number): number {
+    const words = text.split(/\s+/).filter(Boolean);
+    let weightedSum = 0;
+
+    for (const word of words) {
+        const len = word.length;
+        if (len === 0) continue;
+
+        for (let i = 0; i < len; i++) {
+            // Weight: edges get weight 4, middle gets weight 1
+            // Distance from edge: min(i, len - 1 - i)
+            const distFromEdge = Math.min(i, len - 1 - i);
+            const weight = distFromEdge === 0 ? 4 : (distFromEdge === 1 ? 2 : 1);
+            weightedSum += word.charCodeAt(i) * weight;
+        }
+        // Add word length as separator
+        weightedSum += len * 1000;
+    }
+
+    // Combine with seed and hash
+    return djb2Hash(weightedSum.toString() + text, seed);
+}
+
+/**
+ * Word Boundary N-grams Hash: Uses trigrams (3-character sequences) that respect word boundaries.
+ * Only creates n-grams within words, not across word boundaries.
+ * This provides better discrimination while maintaining word identity.
+ * Example: "Data Science" -> ["Dat", "ata"] + ["Sci", "cie", "ien", "enc", "nce"]
+ */
+function hashWordBoundaryNgrams(text: string, seed: number): number {
+    const words = text.split(/\s+/).filter(Boolean);
+    const trigrams: string[] = [];
+
+    for (const word of words) {
+        if (word.length < 3) {
+            // For short words, just use the word itself
+            trigrams.push(word);
+        } else {
+            // Extract all trigrams from this word
+            for (let i = 0; i <= word.length - 3; i++) {
+                trigrams.push(word.substring(i, i + 3));
+            }
+        }
+    }
+
+    if (trigrams.length === 0) return djb2Hash(text, seed);
+
+    // Hash all trigrams together with word count for extra discrimination
+    const signature = trigrams.join('|') + ':' + words.length.toString();
+    return djb2Hash(signature, seed);
+}
+
+/**
+ * Length + Middle Hash: Combines word length with middle characters.
+ * For each word, takes: length + first char + middle char(s) + last char.
+ * This provides excellent discrimination while being compact.
+ * Example: "Data" (len=4) -> "4Dta", "Science" (len=7) -> "7Scee"
+ */
+function hashLengthMiddle(text: string, seed: number): number {
+    const words = text.split(/\s+/).filter(Boolean);
+    const signature = words.map(word => {
+        const len = word.length;
+        if (len === 0) return "0";
+        if (len === 1) return "1" + word + word;
+        if (len === 2) return "2" + word;
+
+        const first = word.charAt(0);
+        const last = word.charAt(len - 1);
+
+        // Get middle character(s)
+        let middle: string;
+        if (len === 3) {
+            middle = word.charAt(1);
+        } else if (len % 2 === 0) {
+            // Even length: take two middle chars
+            const mid = len / 2;
+            middle = word.substring(mid - 1, mid + 1);
+        } else {
+            // Odd length: take center char
+            const mid = Math.floor(len / 2);
+            middle = word.charAt(mid);
+        }
+
+        return len.toString() + first + middle + last;
+    }).join('');
+
     return djb2Hash(signature, seed);
 }
 
