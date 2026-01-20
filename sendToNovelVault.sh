@@ -13,5 +13,6 @@ cp styles.css link-colorer
 
 # send to my novel folder
 cp -r link-colorer /Users/caffae/Notes/Novel-Writing/.obsidian/plugins/
-echo "Updated plugin in novel writing folder"
+cp -r link-colorer "/Users/caffae/Notes/ZettelPublish (Content Creator V2 April 2025)/.obsidian/plugins/"
+echo "Updated plugin in novel writing and zettelpublish folders"
 
