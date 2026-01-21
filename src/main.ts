@@ -9,7 +9,7 @@ import {
 } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 
-import { LinkColorSettings, DEFAULT_SETTINGS, LinkColorSettingTab, PALETTES, HashMode } from './settings';
+import { LinkColorSettings, DEFAULT_SETTINGS, LinkColorSettingTab, PALETTES } from './settings';
 
 // Global text-to-color mapping to ensure consistent shading per text
 const textColorMap = new Map<string, string>();
@@ -270,66 +270,6 @@ function applyAggressiveVariant(baseColor: string, variantSeed: number, usageCou
 
     const out = hslToRgb(hsl.h, hsl.s, hsl.l);
     return rgbToHex(out.r, out.g, out.b);
-}
-
-// Apply an intra-base variant using a secondary seed and a small shade wobble
-function applyBandVariant(baseColor: string, bandIndex: number, isDarkMode: boolean): string {
-    // Bands: 0 = normal, 1 = vivid, 2 = muted
-    const hex = baseColor.replace('#', '');
-    const r = parseInt(hex.substring(0, 2), 16);
-    const g = parseInt(hex.substring(2, 4), 16);
-    const b = parseInt(hex.substring(4, 6), 16);
-    const hsl = rgbToHsl(r, g, b);
-
-    if (bandIndex === 1) {
-        // vivid
-        hsl.s = Math.min(90, hsl.s + 10);
-        hsl.l = isDarkMode ? Math.min(90, hsl.l + 2) : Math.max(15, hsl.l - 2);
-    } else if (bandIndex === 2) {
-        // muted
-        hsl.s = Math.max(32, hsl.s - 12);
-        hsl.l = isDarkMode ? Math.min(92, hsl.l + 3) : Math.max(12, hsl.l - 3);
-    }
-
-    const out = hslToRgb(hsl.h, hsl.s, hsl.l);
-    return rgbToHex(out.r, out.g, out.b);
-}
-
-function applyVariant(baseColor: string, variantSeed: number, shadeIndex: number, isDarkMode: boolean): string {
-    // Seed decomposition for deterministic tweaks
-    const rand = (n: number) => Math.abs(((variantSeed >> n) ^ (variantSeed << (n % 13))) & 0xffff) / 0xffff;
-
-    // Compute small deterministic adjustments
-    const hueSign = rand(2) > 0.5 ? 1 : -1;
-    const satSign = rand(4) > 0.5 ? 1 : -1;
-
-    // Hue shift up to ~12 degrees with golden-angle inspired spread
-    const hueAmp = 8 + rand(6) * 4; // 8..12
-    const hueShift = hueSign * hueAmp;
-
-    // Saturation delta 6..12%
-    const satDelta = satSign * (6 + rand(8) * 6);
-
-    // Small lightness adjustment 6..12% directed by mode
-    const lightSign = isDarkMode ? 1 : -1;
-    const lightDelta = lightSign * (6 + rand(10) * 6);
-
-    // Convert to HSL, apply shifts, clamp, then blend with improved generateShade wobble
-    const hex = baseColor.replace('#', '');
-    const r = parseInt(hex.substring(0, 2), 16);
-    const g = parseInt(hex.substring(2, 4), 16);
-    const b = parseInt(hex.substring(4, 6), 16);
-    const hsl = rgbToHsl(r, g, b);
-
-    hsl.h = (hsl.h + hueShift + 360) % 360;
-    hsl.s = Math.max(38, Math.min(88, hsl.s + satDelta));
-    hsl.l = Math.max(18, Math.min(88, hsl.l + lightDelta));
-
-    const rgb = hslToRgb(hsl.h, hsl.s, hsl.l);
-    const baseVariant = rgbToHex(rgb.r, rgb.g, rgb.b);
-
-    // Add a subtle shade wobble based on usageCount to avoid identical collisions in a run
-    return generateShade(baseVariant, Math.max(0, shadeIndex), isDarkMode);
 }
 
 /**

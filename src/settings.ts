@@ -93,39 +93,39 @@ export const DEFAULT_SETTINGS: LinkColorSettings = {
 
 export const HASH_MODE_DESCRIPTIONS: Record<HashMode, { name: string; description: string }> = {
     'strict-full': {
-        name: 'Strict (Acronym + Length)',
+        name: 'Strict (acronym + length)',
         description: 'Maximum uniqueness using acronyms, full text, and length. Different words get different colors.'
     },
     'strict-acronym': {
-        name: 'Strict (Acronym Only)',
+        name: 'Strict (acronym only)',
         description: 'Uses only first letters of words. Similar structure words may share colors.'
     },
     'strict-first-last': {
-        name: 'Strict (First & Last Letters)',
+        name: 'Strict (first & last letters)',
         description: 'Uses the first and last letters of every word (e.g. "Data Science" -> "DaSe").'
     },
     'strict-first-two-last-two': {
-        name: 'Strict (First 2 + Last 2)',
+        name: 'Strict (first 2 + last 2)',
         description: 'Uses first 2 and last 2 characters of each word. Better discrimination than first-last alone (e.g. "Data Science" -> "DataScce").'
     },
     'vowel-consonant': {
-        name: 'Vowel-Consonant Pattern',
+        name: 'Vowel-consonant pattern',
         description: 'Creates a pattern based on vowel/consonant positions. Each character becomes V or C, creating unique patterns.'
     },
     'position-weighted': {
-        name: 'Position-Weighted',
+        name: 'Position-weighted',
         description: 'Characters weighted by position (edges weighted more). Better discrimination for words with similar starts/ends but different middles.'
     },
     'word-boundary-ngrams': {
-        name: 'Word Boundary N-grams',
+        name: 'Word boundary n-grams',
         description: 'Uses trigrams (3-char sequences) within words only, respecting word boundaries. Maintains word identity while providing good discrimination.'
     },
     'length-middle': {
-        name: 'Length + Middle Chars',
+        name: 'Length + middle chars',
         description: 'Combines word length with first, middle, and last characters. Excellent discrimination while being compact.'
     },
     'similarity': {
-        name: 'Similarity-Based',
+        name: 'Similarity-based',
         description: 'Similar words get similar colors using Levenshtein distance. Great for related terms.'
     }
 }
@@ -157,7 +157,7 @@ export class LinkColorSettingTab extends PluginSettingTab {
                 dropdown
                     .setValue(this.plugin.settings.palette)
                     .onChange(async (value) => {
-                        this.plugin.settings.palette = value as PaletteType;
+                        this.plugin.settings.palette = value;
                         await this.plugin.saveSettings();
                         this.updatePreview();
                     });
