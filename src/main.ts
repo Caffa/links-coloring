@@ -255,18 +255,32 @@ function applyAggressiveVariant(baseColor: string, variantSeed: number, usageCou
     hsl.h = (hsl.h + effectiveSpread + randomHueNoise + 360) % 360;
 
     // --- FIX 3: SATURATION/LIGHTNESS VARIANCE ---
-    // Dark mode needs high Lightness to be readable. Light mode needs low Lightness.
+    // Dark mode: softer, less saturated colors for reduced eye strain
+    // Light mode: higher saturation works well against light backgrounds
 
-    // Saturation: 60% to 95% range (High saturation is distinct)
-    const satNoise = (rand(5) - 0.5) * 30; // +/- 15%
-    hsl.s = Math.max(50, Math.min(95, hsl.s + satNoise));
+    // Saturation: Mode-specific ranges
+    if (isDarkMode) {
+        // Dark mode: softer, less saturated (30-65% range)
+        const satNoise = (rand(5) - 0.5) * 20; // +/- 10%
+        hsl.s = Math.max(30, Math.min(65, hsl.s + satNoise));
+    } else {
+        // Light mode: keep current high saturation (50-95% range)
+        const satNoise = (rand(5) - 0.5) * 30; // +/- 15%
+        hsl.s = Math.max(50, Math.min(95, hsl.s + satNoise));
+    }
 
-    // Lightness: Ensure contrast but allow variance
-    // Dark Mode: Range 65% - 85%
-    // Light Mode: Range 25% - 45%
-    const lightTarget = isDarkMode ? 75 : 35;
-    const lightNoise = (rand(7) - 0.5) * 20; // +/- 10%
-    hsl.l = Math.max(isDarkMode ? 60 : 20, Math.min(isDarkMode ? 90 : 50, lightTarget + lightNoise));
+    // Lightness: Mode-specific ranges for optimal contrast
+    if (isDarkMode) {
+        // Dark mode: moderate brightness (50-75% range)
+        const lightTarget = 62; // Lower target for less neon effect
+        const lightNoise = (rand(7) - 0.5) * 15; // +/- 7.5%
+        hsl.l = Math.max(50, Math.min(75, lightTarget + lightNoise));
+    } else {
+        // Light mode: keep current (20-50% range)
+        const lightTarget = 35;
+        const lightNoise = (rand(7) - 0.5) * 20; // +/- 10%
+        hsl.l = Math.max(20, Math.min(50, lightTarget + lightNoise));
+    }
 
     const out = hslToRgb(hsl.h, hsl.s, hsl.l);
     return rgbToHex(out.r, out.g, out.b);
