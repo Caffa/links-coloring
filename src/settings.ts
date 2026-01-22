@@ -2,7 +2,15 @@ import { App, PluginSettingTab, Setting } from 'obsidian';
 import LinkColorPlugin from './main';
 
 // --- 1. DEFINED PALETTES ---
+// The palette should have distinctly different colors (that are different in hue instead of saturation or lightness). They should alternate between Warm and Cool colors, neighbors in your array should be >90° apart on the color wheel.
 export const PALETTES: Record<string, { dark: string[], light: string[] }> = {
+
+    dusty_alternating: {
+        // Red -> Slate -> Orange -> Purple -> Gold -> Blue -> Rose
+        dark: ["#c25e5e", "#5e8e99", "#c2865e", "#845ec2", "#c2a85e", "#5e73c2", "#c25e94"],
+        // Darker variants for high contrast on light backgrounds
+        light: ["#9e4545", "#3f666e", "#96623f", "#5e3f91", "#917c3f", "#425391", "#913f6b"]
+    },
     vibrant: {
         dark: ["#FF5252", "#448AFF", "#FFD740", "#E040FB", "#FFAB40", "#18FFFF", "#FF4081", "#69F0AE"],
         light: ["#D50000", "#2962FF", "#FFAB00", "#AA00FF", "#EF6C00", "#00B8D4", "#C51162", "#00C853"]
@@ -35,18 +43,7 @@ export const PALETTES: Record<string, { dark: string[], light: string[] }> = {
         dark: ["#BF616A", "#5E81AC", "#D08770", "#88C0D0", "#EBCB8B", "#81A1C1", "#A3BE8C", "#8FBCBB"],
         light: ["#BF616A", "#3B566E", "#C2664D", "#4C7899", "#B58900", "#5E81AC", "#7A9663", "#4C7A82"]
     },
-    extended: {
-        dark: [
-            "#FF5252", "#18FFFF", "#FFD740", "#7C4DFF", "#FFAB40", "#69F0AE", "#FF4081", "#40C4FF",
-            "#FF8A80", "#64FFDA", "#FFE57F", "#B388FF", "#FF9E80", "#CCFF90", "#EA80FC", "#80D8FF",
-            "#FFD180", "#A7FFEB", "#FFFF8D", "#E040FB", "#FF80AB", "#EEFF41", "#F4FF81", "#CFD8DC"
-        ],
-        light: [
-            "#C62828", "#00B8D4", "#FFAB00", "#6200EA", "#EF6C00", "#00C853", "#C51162", "#0091EA",
-            "#B71C1C", "#00BFA5", "#FF6F00", "#AA00FF", "#BF360C", "#33691E", "#880E4F", "#01579B",
-            "#E65100", "#004D40", "#F57F17", "#4A148C", "#D81B60", "#AEEA00", "#827717", "#455A64"
-        ]
-    },
+
     catppuccin: {
         dark: ["#ed8796", "#8aadf4", "#eed49f", "#c6a0f6", "#f5a97f", "#8bd5ca", "#f5bde6"],
         light: ["#D20F39", "#1E66F5", "#DF8E1D", "#8839EF", "#FE640B", "#179299", "#EA76CB"]
