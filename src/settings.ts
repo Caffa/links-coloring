@@ -48,8 +48,8 @@ export const PALETTES: Record<string, { dark: string[], light: string[] }> = {
         ]
     },
     catppuccin: {
-        dark: ["#ed8796", "#8aadf4", "#eed49f", "#c6a0f6", "#f5a97f", "#8bd5ca", "#f5bde6", "#a6da95"],
-        light: ["#D20F39", "#1E66F5", "#DF8E1D", "#8839EF", "#FE640B", "#179299", "#EA76CB", "#40A02B"]
+        dark: ["#ed8796", "#8aadf4", "#eed49f", "#c6a0f6", "#f5a97f", "#8bd5ca", "#f5bde6"],
+        light: ["#D20F39", "#1E66F5", "#DF8E1D", "#8839EF", "#FE640B", "#179299", "#EA76CB"]
     },
     oceanic_next: {
         dark: ["#ec5f67", "#6699cc", "#f99157", "#62b3b2", "#fac863", "#c594c5", "#ab7967", "#99c794"],
