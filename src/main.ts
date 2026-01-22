@@ -164,8 +164,11 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
     // 4. Generate Hashes
     const seed = settings.customSeed; // <--- GET SEED FROM SETTINGS
 
-    // 3. Check Cache (must include seed so changing seed invalidates cache)
-    const textKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${seed}-${cleaned}`;
+    // 3. Check Cache (must include seed and range settings so changing them invalidates cache)
+    const rangeKey = isDarkMode 
+        ? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
+        : `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
+    const textKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${seed}-${rangeKey}-${cleaned}`;
     if (textColorMap.has(textKey)) {
         return textColorMap.get(textKey)!;
     }
@@ -223,13 +226,13 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
 
     // 8. Apply Aggressive Variant
     // We pass 'currentUsageCount' to force distinctness when a color is reused
-    const finalColor = applyAggressiveVariant(baseColor, variantSeed, currentUsageCount, isDarkMode);
+    const finalColor = applyAggressiveVariant(baseColor, variantSeed, currentUsageCount, isDarkMode, settings);
 
     textColorMap.set(textKey, finalColor);
     return finalColor;
 }
 
-function applyAggressiveVariant(baseColor: string, variantSeed: number, usageCount: number, isDarkMode: boolean): string {
+function applyAggressiveVariant(baseColor: string, variantSeed: number, usageCount: number, isDarkMode: boolean, settings: LinkColorSettings): string {
     const hex = baseColor.replace('#', '');
     const r = parseInt(hex.substring(0, 2), 16);
     const g = parseInt(hex.substring(2, 4), 16);
@@ -258,28 +261,28 @@ function applyAggressiveVariant(baseColor: string, variantSeed: number, usageCou
     // Dark mode: softer, less saturated colors for reduced eye strain
     // Light mode: higher saturation works well against light backgrounds
 
-    // Saturation: Mode-specific ranges
+    // Saturation: Mode-specific ranges from settings
     if (isDarkMode) {
-        // Dark mode: softer, less saturated (30-65% range)
-        const satNoise = (rand(5) - 0.5) * 20; // +/- 10%
-        hsl.s = Math.max(30, Math.min(65, hsl.s + satNoise));
+        const satRange = settings.darkSaturationMax - settings.darkSaturationMin;
+        const satNoise = (rand(5) - 0.5) * (satRange * 0.3); // 30% of range as noise
+        hsl.s = Math.max(settings.darkSaturationMin, Math.min(settings.darkSaturationMax, hsl.s + satNoise));
     } else {
-        // Light mode: keep current high saturation (50-95% range)
-        const satNoise = (rand(5) - 0.5) * 30; // +/- 15%
-        hsl.s = Math.max(50, Math.min(95, hsl.s + satNoise));
+        const satRange = settings.lightSaturationMax - settings.lightSaturationMin;
+        const satNoise = (rand(5) - 0.5) * (satRange * 0.3);
+        hsl.s = Math.max(settings.lightSaturationMin, Math.min(settings.lightSaturationMax, hsl.s + satNoise));
     }
 
-    // Lightness: Mode-specific ranges for optimal contrast
+    // Lightness: Mode-specific ranges from settings
     if (isDarkMode) {
-        // Dark mode: moderate brightness (50-75% range)
-        const lightTarget = 62; // Lower target for less neon effect
-        const lightNoise = (rand(7) - 0.5) * 15; // +/- 7.5%
-        hsl.l = Math.max(50, Math.min(75, lightTarget + lightNoise));
+        const lightRange = settings.darkLightnessMax - settings.darkLightnessMin;
+        const lightTarget = (settings.darkLightnessMin + settings.darkLightnessMax) / 2;
+        const lightNoise = (rand(7) - 0.5) * (lightRange * 0.2); // 20% of range as noise
+        hsl.l = Math.max(settings.darkLightnessMin, Math.min(settings.darkLightnessMax, lightTarget + lightNoise));
     } else {
-        // Light mode: keep current (20-50% range)
-        const lightTarget = 35;
-        const lightNoise = (rand(7) - 0.5) * 20; // +/- 10%
-        hsl.l = Math.max(20, Math.min(50, lightTarget + lightNoise));
+        const lightRange = settings.lightLightnessMax - settings.lightLightnessMin;
+        const lightTarget = (settings.lightLightnessMin + settings.lightLightnessMax) / 2;
+        const lightNoise = (rand(7) - 0.5) * (lightRange * 0.3);
+        hsl.l = Math.max(settings.lightLightnessMin, Math.min(settings.lightLightnessMax, lightTarget + lightNoise));
     }
 
     const out = hslToRgb(hsl.h, hsl.s, hsl.l);

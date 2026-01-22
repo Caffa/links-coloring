@@ -82,6 +82,14 @@ export interface LinkColorSettings {
     ignorePrefix: boolean;
     hashMode: HashMode;
     customSeed: number; // New setting for the hash seed
+    darkSaturationMin: number;
+    darkSaturationMax: number;
+    darkLightnessMin: number;
+    darkLightnessMax: number;
+    lightSaturationMin: number;
+    lightSaturationMax: number;
+    lightLightnessMin: number;
+    lightLightnessMax: number;
 }
 
 export const DEFAULT_SETTINGS: LinkColorSettings = {
@@ -89,6 +97,14 @@ export const DEFAULT_SETTINGS: LinkColorSettings = {
     ignorePrefix: true,
     hashMode: 'strict-full',
     customSeed: 5381, // Default DJB2 seed
+    darkSaturationMin: 30,
+    darkSaturationMax: 65,
+    darkLightnessMin: 50,
+    darkLightnessMax: 75,
+    lightSaturationMin: 50,
+    lightSaturationMax: 95,
+    lightLightnessMin: 20,
+    lightLightnessMax: 50,
 }
 
 export const HASH_MODE_DESCRIPTIONS: Record<HashMode, { name: string; description: string }> = {
@@ -249,6 +265,101 @@ export class LinkColorSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 })
             );
+
+        // --- GROUP 4: COLOR ADJUSTMENT ---
+        new Setting(containerEl).setName("Color adjustment").setHeading();
+
+        // Dark mode saturation
+        new Setting(containerEl)
+            .setName('Dark mode saturation')
+            .setDesc('Saturation range for dark mode (lower = less vibrant, higher = more vibrant)')
+            .addSlider(slider => slider
+                .setLimits(0, 100, 1)
+                .setValue(this.plugin.settings.darkSaturationMin)
+                .setDynamicTooltip()
+                .onChange(async (value) => {
+                    this.plugin.settings.darkSaturationMin = value;
+                    await this.plugin.saveSettings();
+                }))
+            .addSlider(slider => slider
+                .setLimits(0, 100, 1)
+                .setValue(this.plugin.settings.darkSaturationMax)
+                .setDynamicTooltip()
+                .onChange(async (value) => {
+                    if (value >= this.plugin.settings.darkSaturationMin) {
+                        this.plugin.settings.darkSaturationMax = value;
+                        await this.plugin.saveSettings();
+                    }
+                }));
+
+        // Dark mode lightness
+        new Setting(containerEl)
+            .setName('Dark mode lightness')
+            .setDesc('Lightness range for dark mode (lower = darker, higher = brighter)')
+            .addSlider(slider => slider
+                .setLimits(0, 100, 1)
+                .setValue(this.plugin.settings.darkLightnessMin)
+                .setDynamicTooltip()
+                .onChange(async (value) => {
+                    this.plugin.settings.darkLightnessMin = value;
+                    await this.plugin.saveSettings();
+                }))
+            .addSlider(slider => slider
+                .setLimits(0, 100, 1)
+                .setValue(this.plugin.settings.darkLightnessMax)
+                .setDynamicTooltip()
+                .onChange(async (value) => {
+                    if (value >= this.plugin.settings.darkLightnessMin) {
+                        this.plugin.settings.darkLightnessMax = value;
+                        await this.plugin.saveSettings();
+                    }
+                }));
+
+        // Light mode saturation
+        new Setting(containerEl)
+            .setName('Light mode saturation')
+            .setDesc('Saturation range for light mode')
+            .addSlider(slider => slider
+                .setLimits(0, 100, 1)
+                .setValue(this.plugin.settings.lightSaturationMin)
+                .setDynamicTooltip()
+                .onChange(async (value) => {
+                    this.plugin.settings.lightSaturationMin = value;
+                    await this.plugin.saveSettings();
+                }))
+            .addSlider(slider => slider
+                .setLimits(0, 100, 1)
+                .setValue(this.plugin.settings.lightSaturationMax)
+                .setDynamicTooltip()
+                .onChange(async (value) => {
+                    if (value >= this.plugin.settings.lightSaturationMin) {
+                        this.plugin.settings.lightSaturationMax = value;
+                        await this.plugin.saveSettings();
+                    }
+                }));
+
+        // Light mode lightness
+        new Setting(containerEl)
+            .setName('Light mode lightness')
+            .setDesc('Lightness range for light mode')
+            .addSlider(slider => slider
+                .setLimits(0, 100, 1)
+                .setValue(this.plugin.settings.lightLightnessMin)
+                .setDynamicTooltip()
+                .onChange(async (value) => {
+                    this.plugin.settings.lightLightnessMin = value;
+                    await this.plugin.saveSettings();
+                }))
+            .addSlider(slider => slider
+                .setLimits(0, 100, 1)
+                .setValue(this.plugin.settings.lightLightnessMax)
+                .setDynamicTooltip()
+                .onChange(async (value) => {
+                    if (value >= this.plugin.settings.lightLightnessMin) {
+                        this.plugin.settings.lightLightnessMax = value;
+                        await this.plugin.saveSettings();
+                    }
+                }));
     }
 
     updatePreview() {
