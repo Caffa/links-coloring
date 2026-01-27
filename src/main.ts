@@ -165,7 +165,7 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
     const seed = settings.customSeed; // <--- GET SEED FROM SETTINGS
 
     // 3. Check Cache (must include seed and range settings so changing them invalidates cache)
-    const rangeKey = isDarkMode 
+    const rangeKey = isDarkMode
         ? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
         : `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
     const textKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${seed}-${rangeKey}-${cleaned}`;
@@ -289,60 +289,7 @@ function applyAggressiveVariant(baseColor: string, variantSeed: number, usageCou
     return rgbToHex(out.r, out.g, out.b);
 }
 
-/**
- * Generate a shade variation of a color.
- * In dark mode: creates lighter shades (increases brightness)
- * In light mode: creates darker shades (decreases brightness)
- *
- * @param color - The base color in hex format
- * @param shadeIndex - Which shade variation (1 = first variation, 2 = second, etc.)
- * @param isDarkMode - Whether we're in dark mode
- * @returns A new hex color that's a shade variation of the input
- */
-function generateShade(color: string, shadeIndex: number, isDarkMode: boolean): string {
-    // Parse hex color to RGB
-    const hex = color.replace('#', '');
-    const r = parseInt(hex.substring(0, 2), 16);
-    const g = parseInt(hex.substring(2, 4), 16);
-    const b = parseInt(hex.substring(4, 6), 16);
 
-    // Convert RGB to HSL for easier manipulation
-    const hsl = rgbToHsl(r, g, b);
-
-    // Intelligent shade logic:
-    // - Use easing so the total shift approaches a bound instead of growing linearly.
-    // - Slight hue rotation using golden-angle steps to avoid clustering.
-    // - Small alternating saturation tweaks to add variety without blowing out vibrancy.
-
-    const level = Math.max(1, shadeIndex);
-    const ease = 1 - Math.exp(-level / 3); // 0..1 easing as level grows
-
-    // 1) Hue: subtle golden-angle-based rotation, scaled by easing
-    // Map to [-180, 180], then scale down to a small amplitude (~<= 10-12 deg)
-    const golden = 137.508;
-    const deltaH = ((((level * golden) % 360) - 180) * 0.06) * ease; // ~[-10.8, 10.8]
-    hsl.h = (hsl.h + deltaH + 360) % 360;
-
-    // 2) Saturation: alternate up/down with small amplitude, grow with easing
-    const satSign = (level % 2 === 0) ? -1 : 1;
-    const deltaS = satSign * (6 + 6 * ease); // between ~6% and 12%
-    hsl.s = Math.max(28, Math.min(92, hsl.s + deltaS)); // tightened to avoid near-grey and oversaturation
-
-    // 3) Lightness: bounded total adjustment, not linear per step
-    const lightSign = isDarkMode ? 1 : -1; // lighten in dark mode, darken in light mode
-    const maxLShift = 18; // cap total shift to avoid extremes
-    let deltaL = lightSign * maxLShift * ease; // approach +/- maxLShift as level increases
-
-    // add a tiny alternating wobble that diminishes as we approach the bound
-    const wobble = (level % 2 === 0 ? -1 : 1) * 1.5 * (1 - ease);
-    deltaL += wobble;
-
-    hsl.l = Math.max(12, Math.min(92, hsl.l + deltaL)); // keep inside visually pleasing range
-
-    // Convert back to RGB and then to hex
-    const rgb = hslToRgb(hsl.h, hsl.s, hsl.l);
-    return rgbToHex(rgb.r, rgb.g, rgb.b);
-}
 
 /**
  * Convert RGB to HSL color space

@@ -164,7 +164,7 @@ export class LinkColorSettingTab extends PluginSettingTab {
             .setDesc('Choose a predefined color scheme.')
             .addDropdown(dropdown => {
                 Object.keys(PALETTES).forEach((key) => {
-                    const name = key.charAt(0).toUpperCase() + key.slice(1);
+                    const name = key.replace(/_/g, ' ').toLowerCase().replace(/^\w/, c => c.toUpperCase());
                     dropdown.addOption(key, name);
                 });
                 dropdown
