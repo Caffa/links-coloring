@@ -10,6 +10,7 @@ import {
 import { syntaxTree } from '@codemirror/language';
 
 import { LinkColorSettings, DEFAULT_SETTINGS, LinkColorSettingTab, PALETTES } from './settings';
+import { hashPhoneticIpa } from './phonetic';
 
 // Global text-to-color mapping to ensure consistent shading per text
 const textColorMap = new Map<string, string>();
@@ -184,6 +185,7 @@ function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean
         case 'word-boundary-ngrams': hash = hashWordBoundaryNgrams(cleaned, seed); break;
         case 'length-middle': hash = hashLengthMiddle(cleaned, seed); break;
         case 'similarity': hash = hashSimilarity(cleaned, seed); break;
+        case 'phonetic-ipa': hash = hashPhoneticIpa(cleaned, seed); break;
         default: hash = hashStrictFull(cleaned, seed);
     }
 

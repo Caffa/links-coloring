@@ -72,7 +72,7 @@ export const PALETTES: Record<string, { dark: string[], light: string[] }> = {
 
 export type PaletteType = keyof typeof PALETTES;
 // Updated to include all hash modes
-export type HashMode = 'strict-full' | 'strict-acronym' | 'strict-first-last' | 'strict-first-two-last-two' | 'vowel-consonant' | 'position-weighted' | 'word-boundary-ngrams' | 'length-middle' | 'similarity';
+export type HashMode = 'strict-full' | 'strict-acronym' | 'strict-first-last' | 'strict-first-two-last-two' | 'vowel-consonant' | 'position-weighted' | 'word-boundary-ngrams' | 'length-middle' | 'similarity' | 'phonetic-ipa';
 
 export interface LinkColorSettings {
     palette: PaletteType;
@@ -140,6 +140,10 @@ export const HASH_MODE_DESCRIPTIONS: Record<HashMode, { name: string; descriptio
     'similarity': {
         name: 'Similarity-based',
         description: 'Similar words get similar colors using Levenshtein distance. Great for related terms.'
+    },
+    'phonetic-ipa': {
+        name: 'Phonetic (IPA-inspired)',
+        description: 'Words are mapped to an IPA-inspired phonetic form. Similar-sounding words (e.g. "see"/"sea", "cat"/"kat") get similar colors. Conlang-friendly.'
     }
 }
 
@@ -201,7 +205,8 @@ export class LinkColorSettingTab extends PluginSettingTab {
                     'position-weighted',
                     'word-boundary-ngrams',
                     'length-middle',
-                    'similarity'
+                    'similarity',
+                    'phonetic-ipa'
                 ];
                 modes.forEach((mode) => {
                     dropdown.addOption(mode, HASH_MODE_DESCRIPTIONS[mode].name);
