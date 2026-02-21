@@ -72,7 +72,7 @@ export const PALETTES: Record<string, { dark: string[], light: string[] }> = {
     // --- CIELAB-OPTIMIZED PALETTES ---
     // Mathematically designed for maximum perceptual distinctness using CIELAB color space
     // See docs/perceptual-palettes.md for detailed documentation
-    
+
     perceptual_optimal: {
         // 8-color palette optimized for maximum Delta-E between all pairs
         // L*=70, C*=55, carefully distributed hues for uniform perceptual separation
@@ -80,7 +80,7 @@ export const PALETTES: Record<string, { dark: string[], light: string[] }> = {
         dark: ["#ff80ad","#ff8774","#e39c4c","#8bb955","#00c3a1","#00c1f1","#45b0ff","#c497f8"],
         light: ["#d24a7e","#cf5546","#af6d15","#598921","#009372","#0091c1","#0082e0","#9367c9"],
     },
-    
+
     perceptual_no_neon: {
         // 8-color palette avoiding neon/electric greens (90-150° hue range)
         // Uses warm spectrum (reds, corals, golds) + cool teals/blues/purples
@@ -88,7 +88,7 @@ export const PALETTES: Record<string, { dark: string[], light: string[] }> = {
         dark: ["#ff82be","#ff828c","#f4935a","#00c290","#00c4c3","#00c0f7","#45b0ff","#e18de5"],
         light: ["#cd4c8f","#d54d5d","#bf6329","#009261","#009394","#0090c7","#0082e0","#b05cb6"],
     },
-    
+
     perceptual_vibrant: {
         // 7-color Ayu-balanced palette (no teal)
         // L*=68, C*=42 - Harmonizes with Ayu Mirage/Light themes
@@ -96,7 +96,7 @@ export const PALETTES: Record<string, { dark: string[], light: string[] }> = {
         dark: ["#ec87a7","#eb8c7c","#d39b5f","#8fb066","#00b7da","#6aaaf1","#ba97e0"],
         light: ["#c94879","#c55244","#a76917","#568322","#008bb8","#007cd5","#8d63bf"],
     },
-    
+
     perceptual_soft: {
         // 8-color soft palette - muted, Nord-like aesthetic
         // L*=68, C*=35 - Easy on the eyes for long sessions
@@ -264,7 +264,7 @@ export class LinkColorSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Ignore prefixes')
-            .setDesc('If enabled, "Char - Pamela" is colored based on "Pamela" only.')
+            .setDesc('If enabled, "char - pamela" is colored based on "pamela" only.')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.ignorePrefix)
                 .onChange(async (value) => {
