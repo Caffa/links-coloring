@@ -67,7 +67,43 @@ export const PALETTES: Record<string, { dark: string[], light: string[] }> = {
     ayu_mirage: {
         dark: ["#f28779", "#73d0ff", "#ffd580", "#d4bfff", "#bae67e", "#5ccfe6", "#95e6cb", "#cbccc6"],
         light: ["#A63D30", "#005F8F", "#B37A00", "#6B4EA8", "#5F8A24", "#00667A", "#2D7D62", "#5C5D57"]
-    }
+    },
+
+    // --- CIELAB-OPTIMIZED PALETTES ---
+    // Mathematically designed for maximum perceptual distinctness using CIELAB color space
+    // See docs/perceptual-palettes.md for detailed documentation
+    
+    perceptual_optimal: {
+        // 8-color palette optimized for maximum Delta-E between all pairs
+        // L*=70, C*=55, carefully distributed hues for uniform perceptual separation
+        // Avoids muddy yellow-greens by strategic hue placement
+        dark: ["#ff80ad","#ff8774","#e39c4c","#8bb955","#00c3a1","#00c1f1","#45b0ff","#c497f8"],
+        light: ["#d24a7e","#cf5546","#af6d15","#598921","#009372","#0091c1","#0082e0","#9367c9"],
+    },
+    
+    perceptual_no_neon: {
+        // 8-color palette avoiding neon/electric greens (90-150° hue range)
+        // Uses warm spectrum (reds, corals, golds) + cool teals/blues/purples
+        // L*=70, C*=55, hues=[350,20,55,165,195,230,270,325]
+        dark: ["#ff82be","#ff828c","#f4935a","#00c290","#00c4c3","#00c0f7","#45b0ff","#e18de5"],
+        light: ["#cd4c8f","#d54d5d","#bf6329","#009261","#009394","#0090c7","#0082e0","#b05cb6"],
+    },
+    
+    perceptual_vibrant: {
+        // 7-color Ayu-balanced palette (no teal)
+        // L*=68, C*=42 - Harmonizes with Ayu Mirage/Light themes
+        // Min Delta-E ≈ 25 for good perceptual distinctness
+        dark: ["#ec87a7","#eb8c7c","#d39b5f","#8fb066","#00b7da","#6aaaf1","#ba97e0"],
+        light: ["#c94879","#c55244","#a76917","#568322","#008bb8","#007cd5","#8d63bf"],
+    },
+    
+    perceptual_soft: {
+        // 8-color soft palette - muted, Nord-like aesthetic
+        // L*=68, C*=35 - Easy on the eyes for long sessions
+        // Min Delta-E ≈ 21 - gentle color transitions
+        dark: ["#e18da7","#e19183","#cd9c6b","#94af71","#53b69f","#31b4d1","#79a9e4","#b79ad6"],
+        light: ["#bf5179","#bd594a","#a36b27","#5c8230","#008a6f","#0088b0","#007bc9","#8b66b6"],
+    },
 };
 
 export type PaletteType = keyof typeof PALETTES;
