@@ -1,121 +1,62 @@
-# Link Colorer for Obsidian
+# Link Colorer
 
-This is an Obsidian plugin that automatically colors your internal links based on their text content. It uses deterministic hashing to ensure that `[[Apple]]` appears in the exact same color every time you type it, helping you visually distinguish between different concepts, characters, or topics in your vault.
+This plugin automatically colors your internal links based on what they say. `[[Apple]]` will always appear in the same color every time you type it, helping you visually tell different things apart.
 
 <img width="1256" height="628" alt="14405" src="https://github.com/user-attachments/assets/5f30f169-3a4e-44a7-8896-c9c935e53b2c" />
 
 I use this for fiction writing since each character is a different link (I use various complements together with this)
 
-## ✨ Features
+## Features
 
-*   **Deterministic Coloring:** The color is derived mathematically from the link text. `[[Obsidian]]` will always be the same specific shade of purple, no matter where it appears.
-*   **Live Preview Support:** Colors are applied instantly in the editor as you type.
-*   **Smart Aliasing:** In a link like `[[Apple|Fruit]]`, the word "Fruit" is colored based on the link target ("Apple"), ensuring visual consistency for the underlying concept.
-*   **Prefix Ignoring:** Option to ignore organizational prefixes. If enabled, `[[Char - Charlus Potter]]` generates the same color as `[[Charlus Potter]]`.
-*   **High-Contrast Palettes:** Includes professionally curated color schemes including:
-    *   🧛🏻‍♂️ **Dracula**
-    *   ☀️ **Solarized**
-    *   🌲 **Nord**
-    *   📦 **Gruvbox**
-    *   👾 **Synthwave** (Neon)
-    *   🌑 **One Dark**
-*   **Theme Aware:** Automatically adjusts colors for **Light Mode** and **Dark Mode** to ensure readability.
+- **Consistent colors:** `[[Obsidian]]` will always be the same specific shade of purple, no matter where it appears.
+- **Live preview:** Colors show up instantly as you type.
+- **Smart links:** In `[[Apple|Fruit]]`, the word "Fruit" gets colored based on "Apple" so the concept looks the same.
+- **Ignore prefixes:** Option to ignore organizing bits. If enabled, `[[Char - Charlus Potter]]` gets the same color as `[[Charlus Potter]]`.
+- **Color themes:** Pick from Dracula, Solarized, Nord, Gruvbox, Synthwave, One Dark, and more.
+- **Works with light and dark mode:** Colors automatically adjust so they're easy to read.
 
-## 📸 Screenshots
-
-## ⚙️ Configuration
+## Setup
 
 Go to **Settings > Consistent Link Colors**.
 
-### Color Palette
-Choose from a variety of color schemes.
-*   **Vibrant:** Maximum contrast (Red, Blue, Green, Yellow).
-*   **Pastel:** Softer colors, easier on the eyes.
-*   **Dracula/Nord/etc:** Matches popular VSCode/Obsidian themes.
+### Pick a color theme
 
-The settings menu includes a **visual preview** of the colors in the selected palette.
+Choose from different color schemes:
 
-### Ignore Prefixes
-*   **Default:** `On`
-*   **How it works:** If you use a folder-like structure in your filenames, such as `[[Category - Note Name]]`, the plugin will ignore everything before the last ` - ` separator.
-    *   `[[Char - Charlus]]` → Colors based on "Charlus".
-    *   `[[Loc - Hogwarts]]` → Colors based on "Hogwarts".
+- **Vibrant:** Bright colors that really stand out.
+- **Pastel:** Softer, easier on the eyes.
+- **Theme colors:** Matches popular editor themes like Dracula and Nord.
 
-### Notes
-It will ignore embeds.
+The settings menu shows you what the colors look like.
 
-## 📦 Installation
+### Ignore prefixes
 
-### Manually
-1.  Download the latest release from the Releases tab (once hosted on GitHub).
-2.  Extract the files (`main.js`, `manifest.json`, `styles.css`) into your vault folder: `.obsidian/plugins/consistent-link-colors/`.
-3.  Reload Obsidian.
-4.  Go to **Settings > Community Plugins** and enable **Consistent Link Colors**.
+- **Default:** On
+- **How it works:** If your notes use a structure like `[[Category - Note Name]]`, the plugin ignores the first part.
+    - `[[Char - Charlus]]` → Colors based on "Charlus"
+    - `[[Loc - Hogwarts]]` → Colors based on "Hogwarts"
 
-### Development
-If you want to modify this plugin:
+## Notes
 
-1.  Clone this repository.
-2.  Run `npm install` to install dependencies.
-3.  Run `npm run build` to compile the TypeScript code.
-4.  Reload the plugin in Obsidian to see changes.
+It ignores embeds (the `![[link]]` format).
 
-## 🤝 Contributing
+## Installation
 
-Contributions are welcome! If you have a favorite color palette you'd like added, feel free to open a Pull Request or Issue.
+1.  Download the latest release from the Releases tab.
+2.  Extract the files (`main.js`, `manifest.json`, `styles.css`) into your vault: `.obsidian/plugins/consistent-link-colors/`.
+3.  Reload the app.
+4.  Go to **Settings > Community plugins** and enable **Consistent Link Colors**.
 
-## Theory 🎨 How Colors are Calculated
+## Contributing
 
-We use a custom deterministic algorithm to assign colors to links. This ensures that the same link text always gets the same color, but similar-looking texts remain visually distinct.
+Have a favorite color palette you'd like added? Feel free to open a pull request or an issue.
 
-### 1. The Seed Strategy
-Instead of hashing the raw text, we generate a **Weighted Seed** to ensure high uniqueness. The seed is constructed from:
-1.  **Acronyms:** The first letter of every word (e.g., "Machine Learning" → `ml`).
-2.  **Full Text:** The full cleaned string to preserve uniqueness.
-3.  **Length:** The character count appended to the end.
+## Support
 
-This structure implies that even a single character difference (like a plural 's') changes the length, which radically changes the seed.
+If you find this useful and want to support me, I'd really appreciate a coffee on [Ko-fi](https://ko-fi.com/pamelawang_mwahacookie). Even more, I'd love if you contributed color palettes to the project.
 
-### 2. The Hash Function (DJB2)
-We use a modified **DJB2** hash function. It is a widely used non-cryptographic hash function known for its excellent distribution and speed.
+Thanks, and happy writing!
 
-*   **The Magic Number:** It initializes with `5381`.
-*   **The Shift:** For every character in the seed, it multiplies the current hash by 33 (bitshifted as `(hash << 5) + hash`) and adds the character code.
-*   **The Avalanche Effect:** Because the length is appended to the seed, the hash creates a "snowball effect." A tiny change in input results in a completely different hash output.
-
-### 3. Collision Calculation Example
-
-Here is how the algorithm differentiates between two nearly identical inputs: **"Design System"** vs **"Design Systems"**.
-
-#### Case A: "Design System"
-*   **Input:** `design system`
-*   **Acronym:** `ds`
-*   **Length:** `13`
-*   **Generated Seed:** `dsdesign system13`
-*   **DJB2 Hash:** `385621945`
-*   **Modulo (Extended Palette):** `385621945 % 24` = **Index 17**
-*   **Result:** <span style="color: #7C4DFF">■ Deep Purple Accent</span>
-
-#### Case B: "Design Systems" (Plural)
-*   **Input:** `design systems`
-*   **Acronym:** `ds`
-*   **Length:** `14` (Length changed!)
-*   **Generated Seed:** `dsdesign systems14`
-*   **DJB2 Hash:** `921874632` (Drastically different due to avalanche effect)
-*   **Modulo (Extended Palette):** `921874632 % 24` = **Index 8**
-*   **Result:** <span style="color: #80D8FF">■ Light Blue</span>
-
-*Even though the strings share 99% of the same characters, the **Length-Weighted Seed** ensures they land on opposite sides of the color palette.*
-
-## ☕ Support This Project
-
-If you find Link Colorer useful, I'd truly appreciate your support. Please consider buying me a coffee on [Ko-fi](https://ko-fi.com/pamelawang_mwahacookie). If not, I would really appreciate color palettes for the project.
-
-Thank you. Happy writing and organizing your brilliant ideas!
-
-## 📄 License
+## License
 
 [MIT](LICENSE)
-
-ko
-
