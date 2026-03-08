@@ -33,3 +33,51 @@
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
+/* Advanced settings header */
+.link-color-advanced-header {
+    cursor: pointer;
+    font-weight: bold;
+    margin-top: 20px;
+    margin-bottom: 10px;
+}
+
+/* Clickable elements */
+.clickable {
+    cursor: pointer;
+    margin-top: 10px;
+    user-select: none;
+    transition: color 0.2s ease;
+}
+
+.clickable:hover {
+    color: var(--interactive-accent);
+}
+
+/* Advanced settings description box */
+.link-color-advanced-description {
+    background-color: var(--background-secondary);
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
+
+/* Mode info items */
+.mode-info {
+    margin-bottom: 15px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.mode-info:last-child {
+    border-bottom: none;
+}
+
+/* Advanced settings section container */
+.link-color-advanced-section {
+    margin-top: 15px;
+}
+
+.link-color-advanced-section.collapsed {
+    display: none;
+}
+

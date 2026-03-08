@@ -1,377 +1,882 @@
-import { Plugin } from 'obsidian';
-import { Extension, RangeSetBuilder } from '@codemirror/state';
+import { syntaxTree } from "@codemirror/language";
+import { type Extension, RangeSetBuilder } from "@codemirror/state";
 import {
-    EditorView,
-    Decoration,
-    DecorationSet,
-    ViewPlugin,
-    ViewUpdate
-} from '@codemirror/view';
-import { syntaxTree } from '@codemirror/language';
-
-import { LinkColorSettings, DEFAULT_SETTINGS, LinkColorSettingTab, PALETTES } from './settings';
-import { hashPhoneticIpa } from './phonetic';
+	Decoration,
+	type DecorationSet,
+	type EditorView,
+	ViewPlugin,
+	type ViewUpdate,
+} from "@codemirror/view";
+import { type App, Plugin, type TFile } from "obsidian";
+import { hashPhoneticIpa } from "./phonetic";
+import {
+	DEFAULT_SETTINGS,
+	HASH_MODE_DESCRIPTIONS,
+	type HashMode,
+	type LinkColorSettings,
+	LinkColorSettingTab,
+	PALETTES,
+} from "./settings";
 
 // Global text-to-color mapping to ensure consistent shading per text
 const textColorMap = new Map<string, string>();
 // Track how many times each base color has been used (for shade generation)
 const colorUsageMap = new Map<string, number>();
+// Track which hash mode is currently active for this session
+let activeHashMode: HashMode = "strict-full";
+let isSmartModeEvaluated = false;
+// Store evaluated hash modes with their scores
+const hashModeScores = new Map<HashMode, number>();
+
+/**
+ * Extract unique wiki-style links from a file
+ * Returns link targets (the text inside [[...]])
+ */
+function extractLinksFromFile(file: TFile, vault: any): string[] {
+	const content = vault.cachedRead ? vault.cachedRead(file) : "";
+	if (!content) return [];
+
+	// Match [[link]] and [[link|alias]] patterns
+	const linkPattern = /\[\[([^\]]+)\]\]/g;
+	const links: string[] = [];
+	let match: RegExpExecArray | null = null;
+
+	while (true) {
+		match = linkPattern.exec(content);
+		if (match === null) break;
+
+		const linkText = match[1];
+		if (!linkText) continue;
+
+		// Handle aliases: [[target|alias]] → use "target"
+		const pipeIndex = linkText.indexOf("|");
+		const cleanLinkText =
+			pipeIndex !== -1 ? linkText.substring(0, pipeIndex) : linkText;
+		links.push(cleanLinkText);
+	}
+
+	return [...new Set(links)]; // Deduplicate
+}
+
+/**
+ * Collect sample links from current folder context
+ * - Starts with links from current active file
+ * - Then adds links from same folder
+ * - If < 20 links, moves up folder hierarchy
+ * - Continues until 20+ links or reaches vault root
+ */
+async function collectSampleLinks(
+	app: App,
+	minLinks: number = 20,
+	maxLinks: number = 50,
+): Promise<string[]> {
+	const activeFile = app.workspace.getActiveFile();
+	if (!activeFile) {
+		// No active file, use some arbitrary file
+		const files = app.vault.getMarkdownFiles();
+		if (files.length === 0) return [];
+		const firstFile = files[0];
+		if (!firstFile) return [];
+		return extractLinksFromFile(firstFile, app.vault).slice(0, maxLinks);
+	}
+
+	const sampleLinks = new Set<string>();
+
+	// Step 1: Extract links from current active file
+	const currentFileLinks = extractLinksFromFile(activeFile, app.vault);
+	currentFileLinks.forEach((link) => sampleLinks.add(link));
+
+	if (sampleLinks.size >= minLinks) {
+		return Array.from(sampleLinks).slice(0, maxLinks);
+	}
+
+	// Step 2: Add links from files in same folder
+	const folder = activeFile.parent;
+	if (folder) {
+		const folderFiles = app.vault
+			.getMarkdownFiles()
+			.filter((f: TFile) => f.parent === folder);
+		for (const file of folderFiles) {
+			const links = extractLinksFromFile(file, app.vault);
+			links.forEach((link) => sampleLinks.add(link));
+			if (sampleLinks.size >= maxLinks) {
+				return Array.from(sampleLinks).slice(0, maxLinks);
+			}
+		}
+	}
+
+	// Step 3: Move up folder hierarchy until we have enough links
+	let currentFolder = folder;
+	while (currentFolder && sampleLinks.size < maxLinks) {
+		// Move up one level
+		currentFolder = currentFolder.parent;
+		if (!currentFolder) break; // Reached vault root
+
+		// Get all files in this folder
+		const folderFiles = app.vault
+			.getMarkdownFiles()
+			.filter((f: TFile) => f.parent === currentFolder);
+		for (const file of folderFiles) {
+			const links = extractLinksFromFile(file, app.vault);
+			links.forEach((link) => sampleLinks.add(link));
+			if (sampleLinks.size >= maxLinks) {
+				return Array.from(sampleLinks).slice(0, maxLinks);
+			}
+		}
+	}
+
+	// Return collected links
+	return Array.from(sampleLinks);
+}
+
+/**
+ * Get random color from palette with consistency and color avoidance
+ * - Uses caching to ensure same link text gets same color per session
+ * - Implements load balancing to avoid overusing colors
+ * - Applies hue/shade adjustments for visual distinction
+ */
+function getRandomColor(
+	text: string,
+	settings: LinkColorSettings,
+	isDarkMode: boolean,
+): string {
+	// 1. Clean Prefix (consistent with other modes)
+	if (settings.ignorePrefix && text.includes(" - ")) {
+		const parts = text.split(" - ");
+		const namePart = parts[parts.length - 1];
+		if (namePart) text = namePart.trim();
+	}
+
+	// 2. Prepare Data
+	const cleaned = text.trim().toLowerCase();
+	const seed = settings.customSeed;
+
+	// 3. Check Cache (consistent with other modes)
+	const rangeKey = isDarkMode
+		? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
+		: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
+	const textKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${rangeKey}-${cleaned}`;
+	if (textColorMap.has(textKey)) {
+		return textColorMap.get(textKey)!;
+	}
+
+	// 4. Generate random hash (different from other modes)
+	const hash = djb2Hash(cleaned, seed);
+
+	// 5. Select Palette with Load Balancing
+	const paletteObj = PALETTES[settings.palette] ?? PALETTES["vibrant"]!;
+	const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
+	const paletteSize = colorList.length;
+
+	// Load Balancing: find least used color
+	let bestIndex = -1;
+	let minUsage = Number.MAX_SAFE_INTEGER;
+	const startOffset = hash % paletteSize;
+
+	for (let i = 0; i < paletteSize; i++) {
+		const idx = (startOffset + i) % paletteSize;
+		const key = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${idx}`;
+		const usage = colorUsageMap.get(key) || 0;
+
+		if (usage < minUsage) {
+			minUsage = usage;
+			bestIndex = idx;
+		}
+	}
+
+	// 6. Register Usage
+	const selectedKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${bestIndex}`;
+	const currentUsageCount = colorUsageMap.get(selectedKey) || 0;
+	colorUsageMap.set(selectedKey, currentUsageCount + 1);
+
+	const baseColor = colorList[bestIndex]!;
+
+	// 7. Apply Hue/Shade Adjustments (same as other modes)
+	const variantSeed = djb2Hash(cleaned + "|v", seed);
+	const finalColor = applyAggressiveVariant(
+		baseColor,
+		variantSeed,
+		currentUsageCount,
+		isDarkMode,
+		settings,
+	);
+
+	// 8. Cache Result
+	textColorMap.set(textKey, finalColor);
+
+	return finalColor;
+}
+
+/**
+ * Smart mode: Evaluates all hash modes against links from current folder context
+ * and selects one with best color distribution for session
+ */
+async function evaluateSmartHashMode(
+	plugin: LinkColorPlugin,
+): Promise<HashMode> {
+	if (isSmartModeEvaluated && hashModeScores.size > 0) {
+		return activeHashMode; // Already evaluated this session
+	}
+
+	const isDarkMode = document.body.classList.contains("theme-dark");
+	const paletteObj = PALETTES[plugin.settings.palette] ?? PALETTES["vibrant"]!;
+	const palette = isDarkMode ? paletteObj.dark : paletteObj.light;
+	const availableModes = Object.keys(HASH_MODE_DESCRIPTIONS) as HashMode[];
+
+	// Collect sample links from folder context
+	const sampleLinks = await collectSampleLinks(plugin.app);
+
+	if (sampleLinks.length === 0) {
+		// No links found, use default
+		activeHashMode = "strict-full";
+		isSmartModeEvaluated = true;
+		return activeHashMode;
+	}
+
+	console.log(`Smart mode evaluating ${sampleLinks.length} sample links...`);
+
+	// Evaluate each hash mode
+	const scores = availableModes.map((mode) => {
+		// Count how many colors each hash mode produces
+		const colorCounts = new Map<string, number>();
+
+		for (const link of sampleLinks) {
+			if (mode === "random") continue; // Skip random mode in evaluation
+			const color = getColorWithHashMode(
+				link,
+				mode,
+				plugin.settings,
+				isDarkMode,
+				false,
+			);
+			colorCounts.set(color, (colorCounts.get(color) || 0) + 1);
+		}
+
+		// Calculate score:
+		// 1. Prefer using more colors from palette (higher unique count = better)
+		// 2. Prefer even distribution (lower max usage = better)
+		const uniqueColors = colorCounts.size;
+		const colorCountsValues = Array.from(colorCounts.values());
+		const maxUsage =
+			colorCountsValues.length > 0 ? Math.max(...colorCountsValues) : 0;
+		const distributionScore = maxUsage / sampleLinks.length; // Lower is better
+
+		// Combined score: prioritize unique colors, then even distribution
+		// Weight: unique colors × 100 - distribution × 10
+		const score = uniqueColors * 100 - distributionScore * 10;
+
+		hashModeScores.set(mode, score);
+
+		return { mode, score, uniqueColors, maxUsage };
+	});
+
+	// Sort by score (descending - higher score is better)
+	scores.sort((a, b) => b.score - a.score);
+
+	// Select best mode
+	if (scores.length > 0) {
+		const bestScore = scores[0];
+		if (bestScore) {
+			activeHashMode = bestScore.mode;
+			isSmartModeEvaluated = true;
+
+			const modeDescription = HASH_MODE_DESCRIPTIONS[activeHashMode];
+			console.log(`Smart mode selected: ${modeDescription?.name || "unknown"}`);
+			console.log(
+				`  Unique colors: ${bestScore.uniqueColors}/${palette.length}`,
+			);
+			console.log(
+				`  Max usage: ${bestScore.maxUsage}/${sampleLinks.length} (${((bestScore.maxUsage / sampleLinks.length) * 100).toFixed(1)}%)`,
+			);
+		}
+	}
+
+	return activeHashMode;
+}
 
 export default class LinkColorPlugin extends Plugin {
-    settings: LinkColorSettings;
-    editorExtension: Extension;
+	settings: LinkColorSettings;
+	editorExtension: Extension;
 
-    async onload() {
-        await this.loadSettings();
-        this.addSettingTab(new LinkColorSettingTab(this.app, this));
-        this.editorExtension = createLinkColorExtension(this);
-        this.registerEditorExtension(this.editorExtension);
+	async onload() {
+		await this.loadSettings();
+		this.addSettingTab(new LinkColorSettingTab(this.app, this));
+		this.editorExtension = createLinkColorExtension(this);
+		this.registerEditorExtension(this.editorExtension);
 
-        this.registerEvent(this.app.workspace.on('css-change', () => {
-            this.app.workspace.updateOptions();
-        }));
-    }
+		this.registerEvent(
+			this.app.workspace.on("css-change", () => {
+				this.app.workspace.updateOptions();
+			}),
+		);
 
-    async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()) as LinkColorSettings;
-    }
+		// Evaluate smart mode on load if selected
+		if (this.settings.hashMode === "smart") {
+			evaluateSmartHashMode(this);
+		}
+	}
 
-    async saveSettings() {
-        await this.saveData(this.settings);
-        this.app.workspace.updateOptions();
-    }
+	async loadSettings() {
+		this.settings = Object.assign(
+			{},
+			DEFAULT_SETTINGS,
+			await this.loadData(),
+		) as LinkColorSettings;
+	}
+
+	async saveSettings() {
+		await this.saveData(this.settings);
+		this.app.workspace.updateOptions();
+	}
+
+	// Reset all color tracking
+	resetColorState() {
+		textColorMap.clear();
+		colorUsageMap.clear();
+		hashModeScores.clear();
+		isSmartModeEvaluated = false;
+		activeHashMode = "strict-full";
+		console.log("Color state reset");
+	}
 }
 
 function createLinkColorExtension(plugin: LinkColorPlugin) {
-    return ViewPlugin.fromClass(
-        class {
-            decorations: DecorationSet;
+	return ViewPlugin.fromClass(
+		class {
+			decorations: DecorationSet;
 
-            constructor(view: EditorView) {
-                this.decorations = this.buildDecorations(view);
-            }
+			constructor(view: EditorView) {
+				this.decorations = this.buildDecorations(view);
+			}
 
-            update(update: ViewUpdate) {
-                if (update.docChanged || update.viewportChanged) {
-                    this.decorations = this.buildDecorations(update.view);
-                }
-            }
+			update(update: ViewUpdate) {
+				if (update.docChanged || update.viewportChanged) {
+					this.decorations = this.buildDecorations(update.view);
+				}
+			}
 
-            buildDecorations(view: EditorView): DecorationSet {
-                const builder = new RangeSetBuilder<Decoration>();
-                const isDarkMode = document.body.classList.contains('theme-dark');
+			buildDecorations(view: EditorView): DecorationSet {
+				const builder = new RangeSetBuilder<Decoration>();
+				const isDarkMode = document.body.classList.contains("theme-dark");
 
-                let inLink = false;
-                let isEmbed = false;
-                let hasPipe = false;
-                let targetTextBuffer = "";
-                let targetColor = "";
+				let inLink = false;
+				let isEmbed = false;
+				let hasPipe = false;
+				let targetTextBuffer = "";
+				let targetColor = "";
 
-                for (const { from, to } of view.visibleRanges) {
-                    syntaxTree(view.state).iterate({
-                        from,
-                        to,
-                        enter: (node) => {
-                            const type = node.type.name;
-                            const text = view.state.sliceDoc(node.from, node.to);
+				for (const { from, to } of view.visibleRanges) {
+					syntaxTree(view.state).iterate({
+						from,
+						to,
+						enter: (node) => {
+							const type = node.type.name;
+							const text = view.state.sliceDoc(node.from, node.to);
 
-                            // 1. Detect Link Start
-                            if (type.includes("formatting-link-start")) {
-                                const charBefore = node.from > 0 ? view.state.sliceDoc(node.from - 1, node.from) : "";
+							// 1. Detect Link Start
+							if (type.includes("formatting-link-start")) {
+								const charBefore =
+									node.from > 0
+										? view.state.sliceDoc(node.from - 1, node.from)
+										: "";
 
-                                // This covers cases where "![[" is parsed as a single token.
-                                isEmbed = charBefore === "!" || text.startsWith("!");
+								// This covers cases where "![[" is parsed as a single token.
+								isEmbed = charBefore === "!" || text.startsWith("!");
 
-                                inLink = true;
-                                hasPipe = false;
-                                targetTextBuffer = "";
-                                targetColor = "";
-                                return;
-                            }
+								inLink = true;
+								hasPipe = false;
+								targetTextBuffer = "";
+								targetColor = "";
+								return;
+							}
 
-                            // 2. Detect Link End
-                            // token type is unexpected (e.g., inside an embed block).
-                            if (type.includes("formatting-link-end") || text === "]]") {
-                                inLink = false;
-                                isEmbed = false;
-                                return;
-                            }
+							// 2. Detect Link End
+							// token type is unexpected (e.g., inside an embed block).
+							if (type.includes("formatting-link-end") || text === "]]") {
+								inLink = false;
+								isEmbed = false;
+								return;
+							}
 
-                            if (inLink && !isEmbed) {
-                                // 3. Runaway Safety
-                                // If we hit a newline while in a link, assume the link was malformed or
-                                // we missed the end token. This prevents coloring the rest of the document.
-                                if (text.includes("\n")) {
-                                    inLink = false;
-                                    return;
-                                }
+							if (inLink && !isEmbed) {
+								// 3. Runaway Safety
+								// If we hit a newline while in a link, assume the link was malformed or
+								// we missed the end token. This prevents coloring the rest of the document.
+								if (text.includes("\n")) {
+									inLink = false;
+									return;
+								}
 
-                                if (text === "|" || type.includes("formatting-link-pipe")) {
-                                    hasPipe = true;
-                                    targetColor = getColor(targetTextBuffer, plugin.settings, isDarkMode);
-                                    return;
-                                }
+								if (text === "|" || type.includes("formatting-link-pipe")) {
+									hasPipe = true;
+									targetColor = getColor(
+										targetTextBuffer,
+										plugin.settings,
+										isDarkMode,
+									);
+									return;
+								}
 
-                                if (!type.includes("formatting")) {
-                                    if (!hasPipe) {
-                                        targetTextBuffer += text;
-                                        const dynColor = getColor(targetTextBuffer, plugin.settings, isDarkMode);
-                                        builder.add(
-                                            node.from,
-                                            node.to,
-                                            Decoration.mark({
-                                                attributes: { style: generateStyleString(dynColor, plugin.settings) },
-                                                class: "consistent-link-target"
-                                            })
-                                        );
-                                    } else {
-                                        if (targetColor) {
-                                            builder.add(
-                                                node.from,
-                                                node.to,
-                                                Decoration.mark({
-                                                    attributes: { style: generateStyleString(targetColor, plugin.settings) },
-                                                    class: "consistent-link-alias"
-                                                })
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                        },
-                    });
-                }
+								if (!type.includes("formatting")) {
+									if (!hasPipe) {
+										targetTextBuffer += text;
+										const dynColor = getColor(
+											targetTextBuffer,
+											plugin.settings,
+											isDarkMode,
+										);
+										builder.add(
+											node.from,
+											node.to,
+											Decoration.mark({
+												attributes: {
+													style: generateStyleString(dynColor, plugin.settings),
+												},
+												class: "consistent-link-target",
+											}),
+										);
+									} else {
+										if (targetColor) {
+											builder.add(
+												node.from,
+												node.to,
+												Decoration.mark({
+													attributes: {
+														style: generateStyleString(
+															targetColor,
+															plugin.settings,
+														),
+													},
+													class: "consistent-link-alias",
+												}),
+											);
+										}
+									}
+								}
+							}
+						},
+					});
+				}
 
-                return builder.finish();
-            }
-        },
-        {
-            decorations: (v) => v.decorations,
-        }
-    );
+				return builder.finish();
+			}
+		},
+		{
+			decorations: (v) => v.decorations,
+		},
+	);
 }
 
-function getColor(text: string, settings: LinkColorSettings, isDarkMode: boolean): string {
-    // 1. Clean Prefix
-    if (settings.ignorePrefix && text.includes(" - ")) {
-        const parts = text.split(" - ");
-        const namePart = parts[parts.length - 1];
-        if (namePart) text = namePart.trim();
-    }
+/**
+ * Get color using a specific hash mode (used by smart mode evaluation)
+ */
+function getColorWithHashMode(
+	text: string,
+	mode: HashMode,
+	settings: LinkColorSettings,
+	isDarkMode: boolean,
+	useCache: boolean = true,
+): string {
+	// 1. Clean Prefix
+	if (settings.ignorePrefix && text.includes(" - ")) {
+		const parts = text.split(" - ");
+		const namePart = parts[parts.length - 1];
+		if (namePart) text = namePart.trim();
+	}
 
-    // 2. Prepare Data
-    const cleaned = text.trim().toLowerCase();
+	// 2. Prepare Data
+	const cleaned = text.trim().toLowerCase();
+	const seed = settings.customSeed;
 
-    // 4. Generate Hashes
-    const seed = settings.customSeed; // <--- GET SEED FROM SETTINGS
+	// 3. Check Cache (if enabled)
+	if (useCache) {
+		const rangeKey = isDarkMode
+			? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
+			: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
+		const textKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${rangeKey}-${cleaned}`;
+		if (textColorMap.has(textKey)) {
+			return textColorMap.get(textKey)!;
+		}
+	}
 
-    // 3. Check Cache (must include seed and range settings so changing them invalidates cache)
-    const rangeKey = isDarkMode
-        ? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
-        : `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
-    const textKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${seed}-${rangeKey}-${cleaned}`;
-    if (textColorMap.has(textKey)) {
-        return textColorMap.get(textKey)!;
-    }
-    let hash: number;
+	// 4. Generate Hash based on specific mode
+	let hash: number;
+	switch (mode) {
+		case "strict-full":
+			hash = hashStrictFull(cleaned, seed);
+			break;
+		case "strict-acronym":
+			hash = hashStrictAcronym(cleaned, seed);
+			break;
+		case "strict-first-last":
+			hash = hashStrictFirstLast(cleaned, seed);
+			break;
+		case "strict-first-two-last-two":
+			hash = hashStrictFirstTwoLastTwo(cleaned, seed);
+			break;
+		case "vowel-consonant":
+			hash = hashVowelConsonant(cleaned, seed);
+			break;
+		case "position-weighted":
+			hash = hashPositionWeighted(cleaned, seed);
+			break;
+		case "word-boundary-ngrams":
+			hash = hashWordBoundaryNgrams(cleaned, seed);
+			break;
+		case "length-middle":
+			hash = hashLengthMiddle(cleaned, seed);
+			break;
+		case "similarity":
+			hash = hashSimilarity(cleaned, seed);
+			break;
+		case "phonetic-ipa":
+			hash = hashPhoneticIpa(cleaned, seed);
+			break;
+		default:
+			hash = hashStrictFull(cleaned, seed);
+	}
 
-    switch (settings.hashMode) {
-        case 'strict-full': hash = hashStrictFull(cleaned, seed); break;
-        case 'strict-acronym': hash = hashStrictAcronym(cleaned, seed); break;
-        case 'strict-first-last': hash = hashStrictFirstLast(cleaned, seed); break;
-        case 'strict-first-two-last-two': hash = hashStrictFirstTwoLastTwo(cleaned, seed); break;
-        case 'vowel-consonant': hash = hashVowelConsonant(cleaned, seed); break;
-        case 'position-weighted': hash = hashPositionWeighted(cleaned, seed); break;
-        case 'word-boundary-ngrams': hash = hashWordBoundaryNgrams(cleaned, seed); break;
-        case 'length-middle': hash = hashLengthMiddle(cleaned, seed); break;
-        case 'similarity': hash = hashSimilarity(cleaned, seed); break;
-        case 'phonetic-ipa': hash = hashPhoneticIpa(cleaned, seed); break;
-        default: hash = hashStrictFull(cleaned, seed);
-    }
+	// 5. Select Palette
+	const paletteObj = PALETTES[settings.palette] ?? PALETTES["vibrant"]!;
+	const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
+	const paletteSize = colorList.length;
 
-    // 5. Select Palette
-    const paletteObj = PALETTES[settings.palette] ?? PALETTES['vibrant']!;
-    const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
-    const paletteSize = colorList.length;
+	// Load Balancing
+	let bestIndex = -1;
+	let minUsage = Number.MAX_SAFE_INTEGER;
+	const startOffset = hash % paletteSize;
 
-    // --- FIX 1: GLOBAL LOAD BALANCING ---
-    // Instead of checking 3 spots, scan the WHOLE palette to find the absolute least used color.
-    // If there is a tie, use the hash to deterministically break it.
+	for (let i = 0; i < paletteSize; i++) {
+		const idx = (startOffset + i) % paletteSize;
+		const key = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${idx}`;
+		const usage = colorUsageMap.get(key) || 0;
 
-    let bestIndex = -1;
-    let minUsage = Number.MAX_SAFE_INTEGER;
+		if (usage < minUsage) {
+			minUsage = usage;
+			bestIndex = idx;
+		}
+	}
 
-    // We create a randomized start point based on hash so we don't always fill index 0 first
-    const startOffset = hash % paletteSize;
+	// Register Usage
+	const selectedKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${bestIndex}`;
+	const currentUsageCount = colorUsageMap.get(selectedKey) || 0;
+	colorUsageMap.set(selectedKey, currentUsageCount + 1);
 
-    for (let i = 0; i < paletteSize; i++) {
-        // Wrap around array
-        const idx = (startOffset + i) % paletteSize;
-        const key = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${seed}-${idx}`;
-        const usage = colorUsageMap.get(key) || 0;
+	const baseColor = colorList[bestIndex]!;
 
-        if (usage < minUsage) {
-            minUsage = usage;
-            bestIndex = idx;
-        }
-    }
+	// Apply Variant
+	const variantSeed = djb2Hash(cleaned + "|v", seed);
+	const finalColor = applyAggressiveVariant(
+		baseColor,
+		variantSeed,
+		currentUsageCount,
+		isDarkMode,
+		settings,
+	);
 
-    // 6. Register Usage
-    const selectedKey = `${settings.palette}-${isDarkMode ? 'dark' : 'light'}-${seed}-${bestIndex}`;
-    const currentUsageCount = colorUsageMap.get(selectedKey) || 0;
-    colorUsageMap.set(selectedKey, currentUsageCount + 1);
+	// Cache result
+	if (useCache) {
+		const rangeKey = isDarkMode
+			? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
+			: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
+		const textKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${rangeKey}-${cleaned}`;
+		textColorMap.set(textKey, finalColor);
+	}
 
-    const baseColor = colorList[bestIndex]!;
-
-    // 7. Variant Seed
-    const variantSeed = djb2Hash(cleaned + '|v', seed);
-
-    // 8. Apply Aggressive Variant
-    // We pass 'currentUsageCount' to force distinctness when a color is reused
-    const finalColor = applyAggressiveVariant(baseColor, variantSeed, currentUsageCount, isDarkMode, settings);
-
-    textColorMap.set(textKey, finalColor);
-    return finalColor;
+	return finalColor;
 }
 
-function applyAggressiveVariant(baseColor: string, variantSeed: number, usageCount: number, isDarkMode: boolean, settings: LinkColorSettings): string {
-    const hex = baseColor.replace('#', '');
-    const r = parseInt(hex.substring(0, 2), 16);
-    const g = parseInt(hex.substring(2, 4), 16);
-    const b = parseInt(hex.substring(4, 6), 16);
-    const hsl = rgbToHsl(r, g, b);
+function getColor(
+	text: string,
+	settings: LinkColorSettings,
+	isDarkMode: boolean,
+): string {
+	// Handle special modes first
+	if (settings.hashMode === "random") {
+		return getRandomColor(text, settings, isDarkMode);
+	}
 
-    // Seed Random generator
-    const rand = (n: number) => Math.abs(((variantSeed >> n) ^ (variantSeed << (n % 13))) & 0xffff) / 0xffff;
+	if (settings.hashMode === "smart") {
+		// Smart mode uses the pre-selected hash mode from evaluation
+		return getColorWithHashMode(text, activeHashMode, settings, isDarkMode);
+	}
 
-    // --- FIX 2: USAGE BASED SPREAD ---
-    // If this is the 1st time using this base color: almost no shift.
-    // 2nd time: shift Left. 3rd time: shift Right. 4th: shift Left more.
-    // This creates a "fan" effect around the base color.
-    const spreadDirection = usageCount % 2 === 0 ? 1 : -1;
-    const spreadMagnitude = Math.ceil(usageCount / 2) * 15; // 15, 30, 45 degree jumps per usage
+	// Regular hash modes
+	// 1. Clean Prefix
+	if (settings.ignorePrefix && text.includes(" - ")) {
+		const parts = text.split(" - ");
+		const namePart = parts[parts.length - 1];
+		if (namePart) text = namePart.trim();
+	}
 
-    // Random noise (kept smaller to preserve the "Base" color identity slightly)
-    const randomHueNoise = (rand(3) - 0.5) * 20; // +/- 10 degrees random wobble
+	// 2. Prepare Data
+	const cleaned = text.trim().toLowerCase();
 
-    // Total Hue Shift
-    // We limit spreadMagnitude to ~60 to prevent complete color crossovers (e.g. Red becoming Blue)
-    const effectiveSpread = Math.min(spreadMagnitude, 60) * spreadDirection;
-    hsl.h = (hsl.h + effectiveSpread + randomHueNoise + 360) % 360;
+	// 4. Generate Hashes
+	const seed = settings.customSeed; // <--- GET SEED FROM SETTINGS
 
-    // --- FIX 3: SATURATION/LIGHTNESS VARIANCE ---
-    // Dark mode: softer, less saturated colors for reduced eye strain
-    // Light mode: higher saturation works well against light backgrounds
+	// 3. Check Cache (must include seed and range settings so changing them invalidates cache)
+	const rangeKey = isDarkMode
+		? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
+		: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
+	const textKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${rangeKey}-${cleaned}`;
+	if (textColorMap.has(textKey)) {
+		return textColorMap.get(textKey)!;
+	}
+	let hash: number;
 
-    // Saturation: Mode-specific ranges from settings
-    if (isDarkMode) {
-        const satRange = settings.darkSaturationMax - settings.darkSaturationMin;
-        const satNoise = (rand(5) - 0.5) * (satRange * 0.3); // 30% of range as noise
-        hsl.s = Math.max(settings.darkSaturationMin, Math.min(settings.darkSaturationMax, hsl.s + satNoise));
-    } else {
-        const satRange = settings.lightSaturationMax - settings.lightSaturationMin;
-        const satNoise = (rand(5) - 0.5) * (satRange * 0.3);
-        hsl.s = Math.max(settings.lightSaturationMin, Math.min(settings.lightSaturationMax, hsl.s + satNoise));
-    }
+	switch (settings.hashMode) {
+		case "strict-full":
+			hash = hashStrictFull(cleaned, seed);
+			break;
+		case "strict-acronym":
+			hash = hashStrictAcronym(cleaned, seed);
+			break;
+		case "strict-first-last":
+			hash = hashStrictFirstLast(cleaned, seed);
+			break;
+		case "strict-first-two-last-two":
+			hash = hashStrictFirstTwoLastTwo(cleaned, seed);
+			break;
+		case "vowel-consonant":
+			hash = hashVowelConsonant(cleaned, seed);
+			break;
+		case "position-weighted":
+			hash = hashPositionWeighted(cleaned, seed);
+			break;
+		case "word-boundary-ngrams":
+			hash = hashWordBoundaryNgrams(cleaned, seed);
+			break;
+		case "length-middle":
+			hash = hashLengthMiddle(cleaned, seed);
+			break;
+		case "similarity":
+			hash = hashSimilarity(cleaned, seed);
+			break;
+		case "phonetic-ipa":
+			hash = hashPhoneticIpa(cleaned, seed);
+			break;
+		default:
+			hash = hashStrictFull(cleaned, seed);
+	}
 
-    // Lightness: Mode-specific ranges from settings
-    if (isDarkMode) {
-        const lightRange = settings.darkLightnessMax - settings.darkLightnessMin;
-        const lightTarget = (settings.darkLightnessMin + settings.darkLightnessMax) / 2;
-        const lightNoise = (rand(7) - 0.5) * (lightRange * 0.2); // 20% of range as noise
-        hsl.l = Math.max(settings.darkLightnessMin, Math.min(settings.darkLightnessMax, lightTarget + lightNoise));
-    } else {
-        const lightRange = settings.lightLightnessMax - settings.lightLightnessMin;
-        const lightTarget = (settings.lightLightnessMin + settings.lightLightnessMax) / 2;
-        const lightNoise = (rand(7) - 0.5) * (lightRange * 0.3);
-        hsl.l = Math.max(settings.lightLightnessMin, Math.min(settings.lightLightnessMax, lightTarget + lightNoise));
-    }
+	// 5. Select Palette
+	const paletteObj = PALETTES[settings.palette] ?? PALETTES["vibrant"]!;
+	const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
+	const paletteSize = colorList.length;
 
-    const out = hslToRgb(hsl.h, hsl.s, hsl.l);
-    return rgbToHex(out.r, out.g, out.b);
+	// --- FIX 1: GLOBAL LOAD BALANCING ---
+	// Instead of checking 3 spots, scan the WHOLE palette to find the absolute least used color.
+	// If there is a tie, use the hash to deterministically break it.
+
+	let bestIndex = -1;
+	let minUsage = Number.MAX_SAFE_INTEGER;
+
+	// We create a randomized start point based on hash so we don't always fill index 0 first
+	const startOffset = hash % paletteSize;
+
+	for (let i = 0; i < paletteSize; i++) {
+		// Wrap around array
+		const idx = (startOffset + i) % paletteSize;
+		const key = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${idx}`;
+		const usage = colorUsageMap.get(key) || 0;
+
+		if (usage < minUsage) {
+			minUsage = usage;
+			bestIndex = idx;
+		}
+	}
+
+	// 6. Register Usage
+	const selectedKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${bestIndex}`;
+	const currentUsageCount = colorUsageMap.get(selectedKey) || 0;
+	colorUsageMap.set(selectedKey, currentUsageCount + 1);
+
+	const baseColor = colorList[bestIndex]!;
+
+	// 7. Variant Seed
+	const variantSeed = djb2Hash(cleaned + "|v", seed);
+
+	// 8. Apply Aggressive Variant
+	// We pass 'currentUsageCount' to force distinctness when a color is reused
+	const finalColor = applyAggressiveVariant(
+		baseColor,
+		variantSeed,
+		currentUsageCount,
+		isDarkMode,
+		settings,
+	);
+
+	textColorMap.set(textKey, finalColor);
+	return finalColor;
 }
 
+function applyAggressiveVariant(
+	baseColor: string,
+	variantSeed: number,
+	usageCount: number,
+	isDarkMode: boolean,
+	settings: LinkColorSettings,
+): string {
+	const hex = baseColor.replace("#", "");
+	const r = parseInt(hex.substring(0, 2), 16);
+	const g = parseInt(hex.substring(2, 4), 16);
+	const b = parseInt(hex.substring(4, 6), 16);
+	const hsl = rgbToHsl(r, g, b);
 
+	// Seed Random generator
+	const rand = (n: number) =>
+		Math.abs(((variantSeed >> n) ^ (variantSeed << (n % 13))) & 0xffff) /
+		0xffff;
+
+	// --- FIX 2: USAGE BASED SPREAD ---
+	// If this is the 1st time using this base color: almost no shift.
+	// 2nd time: shift Left. 3rd time: shift Right. 4th: shift Left more.
+	// This creates a "fan" effect around the base color.
+	const spreadDirection = usageCount % 2 === 0 ? 1 : -1;
+	const spreadMagnitude = Math.ceil(usageCount / 2) * 15; // 15, 30, 45 degree jumps per usage
+
+	// Random noise (kept smaller to preserve the "Base" color identity slightly)
+	const randomHueNoise = (rand(3) - 0.5) * 20; // +/- 10 degrees random wobble
+
+	// Total Hue Shift
+	// We limit spreadMagnitude to ~60 to prevent complete color crossovers (e.g. Red becoming Blue)
+	const effectiveSpread = Math.min(spreadMagnitude, 60) * spreadDirection;
+	hsl.h = (hsl.h + effectiveSpread + randomHueNoise + 360) % 360;
+
+	// --- FIX 3: SATURATION/LIGHTNESS VARIANCE ---
+	// Dark mode: softer, less saturated colors for reduced eye strain
+	// Light mode: higher saturation works well against light backgrounds
+
+	// Saturation: Mode-specific ranges from settings
+	if (isDarkMode) {
+		const satRange = settings.darkSaturationMax - settings.darkSaturationMin;
+		const satNoise = (rand(5) - 0.5) * (satRange * 0.3); // 30% of range as noise
+		hsl.s = Math.max(
+			settings.darkSaturationMin,
+			Math.min(settings.darkSaturationMax, hsl.s + satNoise),
+		);
+	} else {
+		const satRange = settings.lightSaturationMax - settings.lightSaturationMin;
+		const satNoise = (rand(5) - 0.5) * (satRange * 0.3);
+		hsl.s = Math.max(
+			settings.lightSaturationMin,
+			Math.min(settings.lightSaturationMax, hsl.s + satNoise),
+		);
+	}
+
+	// Lightness: Mode-specific ranges from settings
+	if (isDarkMode) {
+		const lightRange = settings.darkLightnessMax - settings.darkLightnessMin;
+		const lightTarget =
+			(settings.darkLightnessMin + settings.darkLightnessMax) / 2;
+		const lightNoise = (rand(7) - 0.5) * (lightRange * 0.2); // 20% of range as noise
+		hsl.l = Math.max(
+			settings.darkLightnessMin,
+			Math.min(settings.darkLightnessMax, lightTarget + lightNoise),
+		);
+	} else {
+		const lightRange = settings.lightLightnessMax - settings.lightLightnessMin;
+		const lightTarget =
+			(settings.lightLightnessMin + settings.lightLightnessMax) / 2;
+		const lightNoise = (rand(7) - 0.5) * (lightRange * 0.3);
+		hsl.l = Math.max(
+			settings.lightLightnessMin,
+			Math.min(settings.lightLightnessMax, lightTarget + lightNoise),
+		);
+	}
+
+	const out = hslToRgb(hsl.h, hsl.s, hsl.l);
+	return rgbToHex(out.r, out.g, out.b);
+}
 
 /**
  * Convert RGB to HSL color space
  */
-function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
-    r /= 255;
-    g /= 255;
-    b /= 255;
+function rgbToHsl(
+	r: number,
+	g: number,
+	b: number,
+): { h: number; s: number; l: number } {
+	r /= 255;
+	g /= 255;
+	b /= 255;
 
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    let h = 0;
-    let s = 0;
-    const l = (max + min) / 2;
+	const max = Math.max(r, g, b);
+	const min = Math.min(r, g, b);
+	let h = 0;
+	let s = 0;
+	const l = (max + min) / 2;
 
-    if (max !== min) {
-        const d = max - min;
-        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+	if (max !== min) {
+		const d = max - min;
+		s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
 
-        switch (max) {
-            case r:
-                h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
-                break;
-            case g:
-                h = ((b - r) / d + 2) / 6;
-                break;
-            case b:
-                h = ((r - g) / d + 4) / 6;
-                break;
-        }
-    }
+		switch (max) {
+			case r:
+				h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+				break;
+			case g:
+				h = ((b - r) / d + 2) / 6;
+				break;
+			case b:
+				h = ((r - g) / d + 4) / 6;
+				break;
+		}
+	}
 
-    return { h: h * 360, s: s * 100, l: l * 100 };
+	return { h: h * 360, s: s * 100, l: l * 100 };
 }
 
 /**
  * Convert HSL to RGB color space
  */
-function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
-    h = h / 360;
-    s = s / 100;
-    l = l / 100;
+function hslToRgb(
+	h: number,
+	s: number,
+	l: number,
+): { r: number; g: number; b: number } {
+	h = h / 360;
+	s = s / 100;
+	l = l / 100;
 
-    let r, g, b;
+	let r: number, g: number, b: number;
 
-    if (s === 0) {
-        r = g = b = l;
-    } else {
-        const hue2rgb = (p: number, q: number, t: number) => {
-            if (t < 0) t += 1;
-            if (t > 1) t -= 1;
-            if (t < 1 / 6) return p + (q - p) * 6 * t;
-            if (t < 1 / 2) return q;
-            if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-            return p;
-        };
+	if (s === 0) {
+		r = g = b = l;
+	} else {
+		const hue2rgb = (p: number, q: number, t: number) => {
+			if (t < 0) t += 1;
+			if (t > 1) t -= 1;
+			if (t < 1 / 6) return p + (q - p) * 6 * t;
+			if (t < 1 / 2) return q;
+			if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+			return p;
+		};
 
-        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-        const p = 2 * l - q;
-        r = hue2rgb(p, q, h + 1 / 3);
-        g = hue2rgb(p, q, h);
-        b = hue2rgb(p, q, h - 1 / 3);
-    }
+		const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+		const p = 2 * l - q;
+		r = hue2rgb(p, q, h + 1 / 3);
+		g = hue2rgb(p, q, h);
+		b = hue2rgb(p, q, h - 1 / 3);
+	}
 
-    return {
-        r: Math.round(r * 255),
-        g: Math.round(g * 255),
-        b: Math.round(b * 255)
-    };
+	return {
+		r: Math.round(r * 255),
+		g: Math.round(g * 255),
+		b: Math.round(b * 255),
+	};
 }
 
 /**
  * Convert RGB values to hex color string
  */
 function rgbToHex(r: number, g: number, b: number): string {
-    const toHex = (n: number) => {
-        const hex = n.toString(16);
-        return hex.length === 1 ? '0' + hex : hex;
-    };
-    return '#' + toHex(r) + toHex(g) + toHex(b);
+	const toHex = (n: number) => {
+		const hex = n.toString(16);
+		return hex.length === 1 ? "0" + hex : hex;
+	};
+	return "#" + toHex(r) + toHex(g) + toHex(b);
 }
 
 /**
@@ -379,10 +884,10 @@ function rgbToHex(r: number, g: number, b: number): string {
  * Example: "Data Science" -> "ds" + "data science" + "12"
  */
 function hashStrictFull(text: string, seed: number): number {
-    const words = text.split(/\s+/).filter(Boolean);
-    const acronyms = words.map(word => word.charAt(0)).join('');
-    const str = acronyms + text + text.length.toString();
-    return djb2Hash(str, seed);
+	const words = text.split(/\s+/).filter(Boolean);
+	const acronyms = words.map((word) => word.charAt(0)).join("");
+	const str = acronyms + text + text.length.toString();
+	return djb2Hash(str, seed);
 }
 
 /**
@@ -391,9 +896,9 @@ function hashStrictFull(text: string, seed: number): number {
  * Example: "Data Science" -> "ds", "Design System" -> "ds" (same color)
  */
 function hashStrictAcronym(text: string, seed: number): number {
-    const words = text.split(/\s+/).filter(Boolean);
-    const acronyms = words.map(word => word.charAt(0)).join('');
-    return djb2Hash(acronyms, seed);
+	const words = text.split(/\s+/).filter(Boolean);
+	const acronyms = words.map((word) => word.charAt(0)).join("");
+	return djb2Hash(acronyms, seed);
 }
 
 /**
@@ -401,13 +906,15 @@ function hashStrictAcronym(text: string, seed: number): number {
  * Example: "Data Science" -> "D" + "a" + "S" + "e" -> "DaSe"
  */
 function hashStrictFirstLast(text: string, seed: number): number {
-    const words = text.split(/\s+/).filter(Boolean);
-    const signature = words.map(word => {
-        if (word.length === 0) return "";
-        if (word.length === 1) return word + word;
-        return word.charAt(0) + word.charAt(word.length - 1);
-    }).join('');
-    return djb2Hash(signature, seed);
+	const words = text.split(/\s+/).filter(Boolean);
+	const signature = words
+		.map((word) => {
+			if (word.length === 0) return "";
+			if (word.length === 1) return word + word;
+			return word.charAt(0) + word.charAt(word.length - 1);
+		})
+		.join("");
+	return djb2Hash(signature, seed);
 }
 
 /**
@@ -416,17 +923,19 @@ function hashStrictFirstLast(text: string, seed: number): number {
  * Example: "Data Science" -> "Da" + "ta" + "Sc" + "ce" -> "DataScce"
  */
 function hashStrictFirstTwoLastTwo(text: string, seed: number): number {
-    const words = text.split(/\s+/).filter(Boolean);
-    const signature = words.map(word => {
-        if (word.length === 0) return "";
-        if (word.length === 1) return word + word + word + word;
-        if (word.length === 2) return word + word;
-        if (word.length === 3) return word.substring(0, 2) + word.substring(1);
-        const firstTwo = word.substring(0, 2);
-        const lastTwo = word.substring(word.length - 2);
-        return firstTwo + lastTwo;
-    }).join('');
-    return djb2Hash(signature, seed);
+	const words = text.split(/\s+/).filter(Boolean);
+	const signature = words
+		.map((word) => {
+			if (word.length === 0) return "";
+			if (word.length === 1) return word + word + word + word;
+			if (word.length === 2) return word + word;
+			if (word.length === 3) return word.substring(0, 2) + word.substring(1);
+			const firstTwo = word.substring(0, 2);
+			const lastTwo = word.substring(word.length - 2);
+			return firstTwo + lastTwo;
+		})
+		.join("");
+	return djb2Hash(signature, seed);
 }
 
 /**
@@ -435,14 +944,18 @@ function hashStrictFirstTwoLastTwo(text: string, seed: number): number {
  * Example: "Data" -> "CVCV", "Science" -> "CCVCCV"
  */
 function hashVowelConsonant(text: string, seed: number): number {
-    const vowels = new Set(['a', 'e', 'i', 'o', 'u']);
-    const words = text.split(/\s+/).filter(Boolean);
-    const pattern = words.map(word => {
-        return Array.from(word).map(char => vowels.has(char) ? 'V' : 'C').join('');
-    }).join('|');
-    // Also include word lengths for extra discrimination
-    const lengthInfo = words.map(w => w.length.toString()).join(',');
-    return djb2Hash(pattern + ':' + lengthInfo, seed);
+	const vowels = new Set(["a", "e", "i", "o", "u"]);
+	const words = text.split(/\s+/).filter(Boolean);
+	const pattern = words
+		.map((word) => {
+			return Array.from(word)
+				.map((char) => (vowels.has(char) ? "V" : "C"))
+				.join("");
+		})
+		.join("|");
+	// Also include word lengths for extra discrimination
+	const lengthInfo = words.map((w) => w.length.toString()).join(",");
+	return djb2Hash(pattern + ":" + lengthInfo, seed);
 }
 
 /**
@@ -452,26 +965,26 @@ function hashVowelConsonant(text: string, seed: number): number {
  * Example: "Data" -> weighted sum of 'D'(4) + 'a'(1) + 't'(1) + 'a'(4)
  */
 function hashPositionWeighted(text: string, seed: number): number {
-    const words = text.split(/\s+/).filter(Boolean);
-    let weightedSum = 0;
+	const words = text.split(/\s+/).filter(Boolean);
+	let weightedSum = 0;
 
-    for (const word of words) {
-        const len = word.length;
-        if (len === 0) continue;
+	for (const word of words) {
+		const len = word.length;
+		if (len === 0) continue;
 
-        for (let i = 0; i < len; i++) {
-            // Weight: edges get weight 4, middle gets weight 1
-            // Distance from edge: min(i, len - 1 - i)
-            const distFromEdge = Math.min(i, len - 1 - i);
-            const weight = distFromEdge === 0 ? 4 : (distFromEdge === 1 ? 2 : 1);
-            weightedSum += word.charCodeAt(i) * weight;
-        }
-        // Add word length as separator
-        weightedSum += len * 1000;
-    }
+		for (let i = 0; i < len; i++) {
+			// Weight: edges get weight 4, middle gets weight 1
+			// Distance from edge: min(i, len - 1 - i)
+			const distFromEdge = Math.min(i, len - 1 - i);
+			const weight = distFromEdge === 0 ? 4 : distFromEdge === 1 ? 2 : 1;
+			weightedSum += word.charCodeAt(i) * weight;
+		}
+		// Add word length as separator
+		weightedSum += len * 1000;
+	}
 
-    // Combine with seed and hash
-    return djb2Hash(weightedSum.toString() + text, seed);
+	// Combine with seed and hash
+	return djb2Hash(weightedSum.toString() + text, seed);
 }
 
 /**
@@ -481,26 +994,26 @@ function hashPositionWeighted(text: string, seed: number): number {
  * Example: "Data Science" -> ["Dat", "ata"] + ["Sci", "cie", "ien", "enc", "nce"]
  */
 function hashWordBoundaryNgrams(text: string, seed: number): number {
-    const words = text.split(/\s+/).filter(Boolean);
-    const trigrams: string[] = [];
+	const words = text.split(/\s+/).filter(Boolean);
+	const trigrams: string[] = [];
 
-    for (const word of words) {
-        if (word.length < 3) {
-            // For short words, just use the word itself
-            trigrams.push(word);
-        } else {
-            // Extract all trigrams from this word
-            for (let i = 0; i <= word.length - 3; i++) {
-                trigrams.push(word.substring(i, i + 3));
-            }
-        }
-    }
+	for (const word of words) {
+		if (word.length < 3) {
+			// For short words, just use the word itself
+			trigrams.push(word);
+		} else {
+			// Extract all trigrams from this word
+			for (let i = 0; i <= word.length - 3; i++) {
+				trigrams.push(word.substring(i, i + 3));
+			}
+		}
+	}
 
-    if (trigrams.length === 0) return djb2Hash(text, seed);
+	if (trigrams.length === 0) return djb2Hash(text, seed);
 
-    // Hash all trigrams together with word count for extra discrimination
-    const signature = trigrams.join('|') + ':' + words.length.toString();
-    return djb2Hash(signature, seed);
+	// Hash all trigrams together with word count for extra discrimination
+	const signature = trigrams.join("|") + ":" + words.length.toString();
+	return djb2Hash(signature, seed);
 }
 
 /**
@@ -510,34 +1023,36 @@ function hashWordBoundaryNgrams(text: string, seed: number): number {
  * Example: "Data" (len=4) -> "4Dta", "Science" (len=7) -> "7Scee"
  */
 function hashLengthMiddle(text: string, seed: number): number {
-    const words = text.split(/\s+/).filter(Boolean);
-    const signature = words.map(word => {
-        const len = word.length;
-        if (len === 0) return "0";
-        if (len === 1) return "1" + word + word;
-        if (len === 2) return "2" + word;
+	const words = text.split(/\s+/).filter(Boolean);
+	const signature = words
+		.map((word) => {
+			const len = word.length;
+			if (len === 0) return "0";
+			if (len === 1) return "1" + word + word;
+			if (len === 2) return "2" + word;
 
-        const first = word.charAt(0);
-        const last = word.charAt(len - 1);
+			const first = word.charAt(0);
+			const last = word.charAt(len - 1);
 
-        // Get middle character(s)
-        let middle: string;
-        if (len === 3) {
-            middle = word.charAt(1);
-        } else if (len % 2 === 0) {
-            // Even length: take two middle chars
-            const mid = len / 2;
-            middle = word.substring(mid - 1, mid + 1);
-        } else {
-            // Odd length: take center char
-            const mid = Math.floor(len / 2);
-            middle = word.charAt(mid);
-        }
+			// Get middle character(s)
+			let middle: string;
+			if (len === 3) {
+				middle = word.charAt(1);
+			} else if (len % 2 === 0) {
+				// Even length: take two middle chars
+				const mid = len / 2;
+				middle = word.substring(mid - 1, mid + 1);
+			} else {
+				// Odd length: take center char
+				const mid = Math.floor(len / 2);
+				middle = word.charAt(mid);
+			}
 
-        return len.toString() + first + middle + last;
-    }).join('');
+			return len.toString() + first + middle + last;
+		})
+		.join("");
 
-    return djb2Hash(signature, seed);
+	return djb2Hash(signature, seed);
 }
 
 /**
@@ -549,16 +1064,16 @@ function hashLengthMiddle(text: string, seed: number): number {
  * get similar colors.
  */
 function hashSimilarity(text: string, seed: number): number {
-    const bigrams = extractBigrams(text);
-    if (bigrams.length === 0) return djb2Hash(text, seed);
+	const bigrams = extractBigrams(text);
+	if (bigrams.length === 0) return djb2Hash(text, seed);
 
-    let hash = seed; // Use the seed
-    for (const bigram of bigrams) {
-        hash = ((hash << 5) + hash) + bigram.charCodeAt(0);
-        hash = ((hash << 5) + hash) + bigram.charCodeAt(1);
-        hash = hash & hash;
-    }
-    return Math.abs(hash);
+	let hash = seed; // Use the seed
+	for (const bigram of bigrams) {
+		hash = (hash << 5) + hash + bigram.charCodeAt(0);
+		hash = (hash << 5) + hash + bigram.charCodeAt(1);
+		hash = hash & hash;
+	}
+	return Math.abs(hash);
 }
 
 /**
@@ -566,11 +1081,11 @@ function hashSimilarity(text: string, seed: number): number {
  * Example: "apple" -> ["ap", "pp", "pl", "le"]
  */
 function extractBigrams(text: string): string[] {
-    const bigrams: string[] = [];
-    for (let i = 0; i < text.length - 1; i++) {
-        bigrams.push(text.substring(i, i + 2));
-    }
-    return bigrams;
+	const bigrams: string[] = [];
+	for (let i = 0; i < text.length - 1; i++) {
+		bigrams.push(text.substring(i, i + 2));
+	}
+	return bigrams;
 }
 
 /**
@@ -578,20 +1093,19 @@ function extractBigrams(text: string): string[] {
  * Known for excellent distribution and speed.
  */
 function djb2Hash(str: string, seed: number = 5381): number {
-    let hash = seed; // Use the passed seed instead of hardcoded 5381
-    for (let i = 0; i < str.length; i++) {
-        hash = ((hash << 5) + hash) + str.charCodeAt(i);
-        hash = hash & hash;
-    }
-    return Math.abs(hash);
+	let hash = seed; // Use the passed seed instead of hardcoded 5381
+	for (let i = 0; i < str.length; i++) {
+		hash = (hash << 5) + hash + str.charCodeAt(i);
+		hash = hash & hash;
+	}
+	return Math.abs(hash);
 }
 
 function generateStyleString(color: string, settings: LinkColorSettings) {
-    return `
+	return `
         color: ${color} !important;
         -webkit-text-fill-color: ${color} !important;
         --link-color: ${color} !important;
         --link-external-color: ${color} !important;
     `;
 }
-
