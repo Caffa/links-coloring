@@ -422,6 +422,7 @@ export interface LinkColorSettings {
 	ignorePrefix: boolean;
 	hashMode: HashMode;
 	customSeed: number; // New setting for the hash seed
+	rerollOnFileChange: boolean; // Automatically re-roll colors when switching files
 	darkSaturationMin: number;
 	darkSaturationMax: number;
 	darkLightnessMin: number;
@@ -437,6 +438,7 @@ export const DEFAULT_SETTINGS: LinkColorSettings = {
 	ignorePrefix: true,
 	hashMode: "smart",
 	customSeed: 5381, // Default DJB2 seed
+	rerollOnFileChange: false, // Automatically re-roll colors when switching files
 	darkSaturationMin: 30,
 	darkSaturationMax: 65,
 	darkLightnessMin: 50,
@@ -672,6 +674,20 @@ export class LinkColorSettingTab extends PluginSettingTab {
 					.onClick(() => {
 						this.plugin.resetColorState();
 						this.display();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Re-roll on file change")
+			.setDesc(
+				"Automatically generate new colors when switching to a different file. Helps avoid color collisions between different links.",
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.rerollOnFileChange)
+					.onChange(async (value) => {
+						this.plugin.settings.rerollOnFileChange = value;
+						await this.plugin.saveSettings();
 					}),
 			);
 

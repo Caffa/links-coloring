@@ -310,6 +310,26 @@ export default class LinkColorPlugin extends Plugin {
 			}),
 		);
 
+		// Re-roll colors when active file changes (if setting is enabled)
+		this.registerEvent(
+			this.app.workspace.on("active-leaf-change", (leaf) => {
+				if (this.settings.rerollOnFileChange && leaf) {
+					const view = leaf.view;
+					// Check if this is a file view with a file
+					const file = 'file' in view ? (view as any).file : null;
+					if (file) {
+						// Generate a new random seed
+						const newSeed = Math.floor(Math.random() * 100000) + 1;
+						this.settings.customSeed = newSeed;
+						// Clear the color cache so new colors are generated
+						this.resetColorState();
+						// Update the editor to reflect new colors
+						this.app.workspace.updateOptions();
+					}
+				}
+			}),
+		);
+
 		// Evaluate smart mode on load if selected
 		if (this.settings.hashMode === "smart") {
 			evaluateSmartHashMode(this);

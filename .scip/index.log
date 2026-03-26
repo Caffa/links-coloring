@@ -1,0 +1,13 @@
+{"timestamp":"2026-03-26T12:05:04.585Z","level":"info","source":"tool","action":"execute","tool":"scip_project_tree","depth":3}
+{"timestamp":"2026-03-26T12:05:04.587Z","level":"info","source":"tool","action":"index_missing","tool":"scip_project_tree"}
+{"timestamp":"2026-03-26T12:05:04.588Z","level":"info","source":"tool","action":"reindex_start","tool":"scip_project_tree"}
+{"timestamp":"2026-03-26T12:05:04.588Z","level":"info","source":"indexer","action":"generate_index_start","incremental":false}
+{"timestamp":"2026-03-26T12:05:04.590Z","level":"info","source":"indexer","action":"adapter_start","adapter":"typescript"}
+{"timestamp":"2026-03-26T12:05:05.702Z","level":"info","source":"indexer","action":"adapter_complete","adapter":"typescript"}
+{"timestamp":"2026-03-26T12:05:05.702Z","level":"info","source":"indexer","action":"generate_index_complete"}
+{"timestamp":"2026-03-26T12:05:05.702Z","level":"info","source":"tool","action":"reindex_complete","tool":"scip_project_tree"}
+{"timestamp":"2026-03-26T12:05:05.716Z","level":"info","source":"tool","action":"query_complete","tool":"scip_project_tree","modules":3}
+{"timestamp":"2026-03-26T12:06:40.135Z","level":"info","source":"tool","action":"execute","tool":"scip_find_definition","symbol":"LinkColorSettings"}
+{"timestamp":"2026-03-26T12:06:40.150Z","level":"info","source":"tool","action":"query_complete","tool":"scip_find_definition","hits":13}
+{"timestamp":"2026-03-26T12:06:54.629Z","level":"info","source":"tool","action":"execute","tool":"scip_find_definition","symbol":"LinkColorSettingTab"}
+{"timestamp":"2026-03-26T12:06:54.642Z","level":"info","source":"tool","action":"query_complete","tool":"scip_find_definition","hits":9}
