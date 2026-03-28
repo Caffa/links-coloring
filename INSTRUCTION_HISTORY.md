@@ -87,3 +87,9 @@ Keep going. Do a sanity check over all youru suggested fixes, will they break th
 ## 2026-03-28T12:39:58.450Z
 
 Yes, apply the fix.
+
+## 2026-03-28T12:43:09.900Z
+
+The precomputeFileLinkColors call still runs for every file switch, including already-open files.
+ This is acceptable (minimal performance impact, designed behavior), but could be optimized in the future by
+ tracking which files have been precomputed.

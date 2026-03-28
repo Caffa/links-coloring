@@ -59,3 +59,5 @@
 {"timestamp":"2026-03-28T12:30:30.858Z","level":"info","source":"tool","action":"query_complete","tool":"scip_find_definition","hits":0}
 {"timestamp":"2026-03-28T12:36:38.501Z","level":"info","source":"tool","action":"execute","tool":"scip_find_definition","symbol":"getColor","file":"src/main.ts"}
 {"timestamp":"2026-03-28T12:36:38.514Z","level":"info","source":"tool","action":"query_complete","tool":"scip_find_definition","hits":10}
+{"timestamp":"2026-03-28T12:43:14.429Z","level":"info","source":"tool","action":"execute","tool":"scip_search_symbols","query":"precomputeFileLinkColors","limit":10}
+{"timestamp":"2026-03-28T12:43:14.434Z","level":"info","source":"tool","action":"query_complete","tool":"scip_search_symbols","hits":0}
