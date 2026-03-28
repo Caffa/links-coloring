@@ -1,0 +1,30 @@
+{
+  "stateVersion": 9,
+  "pendingNextTurnObservation": {
+    "suggestionTurnId": "b9582c7e",
+    "suggestionShownAt": "2026-03-28T12:27:16.657Z",
+    "userPromptSubmittedAt": "2026-03-28T12:29:59.922Z",
+    "variantName": "default",
+    "strategy": "compact",
+    "requestedStrategy": "compact"
+  },
+  "steeringHistory": [
+    {
+      "turnId": "1b6cdef8",
+      "suggestedPrompt": "Looks good, thanks!",
+      "actualUserPrompt": "Do a commit",
+      "classification": "changed_course",
+      "similarity": 0.13333333333333333,
+      "timestamp": "2026-03-28T12:27:03.258Z"
+    },
+    {
+      "turnId": "b9582c7e",
+      "suggestedPrompt": "Push it",
+      "actualUserPrompt": "I tried out the plugin and there is a bug when I click between the files. So the files are not changing. They are just all the same open files, but I'm trying to scroll between them. And when I click between my active files, changing which file is active, the scroll position of the files is changing. Can you investigate all possible causes of this bug? Do not stop at one. Carefully look through what this plugin might be doing.",
+      "classification": "changed_course",
+      "similarity": 0.016018306636155607,
+      "timestamp": "2026-03-28T12:29:59.922Z"
+    }
+  ],
+  "turnsSinceLastStalenessCheck": 3
+}

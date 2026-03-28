@@ -1,0 +1,55 @@
+{
+  "stateVersion": 9,
+  "lastSuggestion": {
+    "text": "Now can you implement the color reset behavior change I mentioned?",
+    "shownAt": "2026-03-28T12:40:27.487Z",
+    "turnId": "bb6eff69",
+    "sourceLeafId": "bb6eff69",
+    "variantName": "default",
+    "strategy": "compact",
+    "requestedStrategy": "compact"
+  },
+  "steeringHistory": [
+    {
+      "turnId": "1b6cdef8",
+      "suggestedPrompt": "Looks good, thanks!",
+      "actualUserPrompt": "Do a commit",
+      "classification": "changed_course",
+      "similarity": 0.13333333333333333,
+      "timestamp": "2026-03-28T12:27:03.258Z"
+    },
+    {
+      "turnId": "b9582c7e",
+      "suggestedPrompt": "Push it",
+      "actualUserPrompt": "I tried out the plugin and there is a bug when I click between the files. So the files are not changing. They are just all the same open files, but I'm trying to scroll between them. And when I click between my active files, changing which file is active, the scroll position of the files is changing. Can you investigate all possible causes of this bug? Do not stop at one. Carefully look through what this plugin might be doing.",
+      "classification": "changed_course",
+      "similarity": 0.016018306636155607,
+      "timestamp": "2026-03-28T12:29:59.922Z"
+    },
+    {
+      "turnId": "fc99c0a2",
+      "suggestedPrompt": "Yes, implement the fixes",
+      "actualUserPrompt": "Yes, implement the fixes",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-03-28T12:33:54.988Z"
+    },
+    {
+      "turnId": "9b5e5c6e",
+      "suggestedPrompt": "Do a commit",
+      "actualUserPrompt": "Keep going. Do a sanity check over all youru suggested fixes, will they break the code?",
+      "classification": "changed_course",
+      "similarity": 0.15066026410564226,
+      "timestamp": "2026-03-28T12:35:37.599Z"
+    },
+    {
+      "turnId": "79f3842e",
+      "suggestedPrompt": "Yes, apply the fix.",
+      "actualUserPrompt": "Yes, apply the fix.",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-03-28T12:39:58.439Z"
+    }
+  ],
+  "turnsSinceLastStalenessCheck": 3
+}

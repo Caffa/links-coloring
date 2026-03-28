@@ -55,3 +55,7 @@
 {"timestamp":"2026-03-28T12:20:57.032Z","level":"info","source":"tool","action":"query_complete","tool":"scip_search_symbols","hits":0}
 {"timestamp":"2026-03-28T12:25:05.950Z","level":"info","source":"tool","action":"execute","tool":"scip_find_references","symbol":"resetColorState","limit":50}
 {"timestamp":"2026-03-28T12:25:05.952Z","level":"info","source":"tool","action":"query_complete","tool":"scip_find_references","hits":2}
+{"timestamp":"2026-03-28T12:30:30.850Z","level":"info","source":"tool","action":"execute","tool":"scip_find_definition","symbol":"precomputeFileLinkColors","file":"src/main.ts"}
+{"timestamp":"2026-03-28T12:30:30.858Z","level":"info","source":"tool","action":"query_complete","tool":"scip_find_definition","hits":0}
+{"timestamp":"2026-03-28T12:36:38.501Z","level":"info","source":"tool","action":"execute","tool":"scip_find_definition","symbol":"getColor","file":"src/main.ts"}
+{"timestamp":"2026-03-28T12:36:38.514Z","level":"info","source":"tool","action":"query_complete","tool":"scip_find_definition","hits":10}

@@ -71,3 +71,19 @@ I want to keep this behaviour but make it so that it is (when the active file's 
 ## 2026-03-28T12:27:03.261Z
 
 Do a commit
+
+## 2026-03-28T12:29:59.925Z
+
+I tried out the plugin and there is a bug when I click between the files. So the files are not changing. They are just all the same open files, but I'm trying to scroll between them. And when I click between my active files, changing which file is active, the scroll position of the files is changing. Can you investigate all possible causes of this bug? Do not stop at one. Carefully look through what this plugin might be doing.
+
+## 2026-03-28T12:33:54.991Z
+
+Yes, implement the fixes
+
+## 2026-03-28T12:35:37.603Z
+
+Keep going. Do a sanity check over all youru suggested fixes, will they break the code?
+
+## 2026-03-28T12:39:58.450Z
+
+Yes, apply the fix.
