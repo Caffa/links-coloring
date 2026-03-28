@@ -660,10 +660,16 @@ export class LinkColorSettingTab extends PluginSettingTab {
 						const newSeed = Math.floor(Math.random() * 100000) + 1;
 						this.plugin.settings.customSeed = newSeed;
 
+						// Clear the color cache so new colors are generated
+						this.plugin.resetColorState();
+
 						// Force refresh of the setting UI
 						this.display();
 
 						await this.plugin.saveSettings();
+
+						// Force all open views to update their colors immediately
+						this.plugin.forceViewUpdate();
 					}),
 			)
 			.addButton((btn) =>
@@ -674,6 +680,8 @@ export class LinkColorSettingTab extends PluginSettingTab {
 					.onClick(() => {
 						this.plugin.resetColorState();
 						this.display();
+						// Force all open views to update their colors immediately
+						this.plugin.forceViewUpdate();
 					}),
 			);
 

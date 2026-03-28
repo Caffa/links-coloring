@@ -7,7 +7,7 @@ import {
 	ViewPlugin,
 	type ViewUpdate,
 } from "@codemirror/view";
-import { type App, Plugin, type TFile, type Vault } from "obsidian";
+import { type App, Plugin, type TFile, type Vault, MarkdownView } from "obsidian";
 import { hashPhoneticIpa } from "./phonetic";
 import {
 	DEFAULT_SETTINGS,
@@ -29,6 +29,11 @@ let isSmartModeEvaluated = false;
 const hashModeScores = new Map<HashMode, number>();
 // Track current parent folder path for folder-based re-roll
 let currentParentFolderPath: string | null = null;
+// Track last known seed to detect changes - used to force view updates
+// Initialize to -1 (an impossible seed value) to force initial render
+let lastKnownSeed: number = -1;
+// Track last known hash mode to detect changes and invalidate cache
+let lastKnownHashMode: HashMode | null = null;
 
 /**
  * Extract unique wiki-style links from a file (ASYNC VERSION)
@@ -217,7 +222,7 @@ function getRandomColor(
 	const rangeKey = isDarkMode
 		? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
 		: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
-	const textKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${rangeKey}-${cleaned}`;
+	const textKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${rangeKey}-random-${cleaned}`;
 	if (textColorMap.has(textKey)) {
 		return textColorMap.get(textKey)!;
 	}
@@ -362,6 +367,10 @@ export default class LinkColorPlugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
+		// Initialize seed tracking from settings
+		lastKnownSeed = this.settings.customSeed;
+		// Initialize hash mode tracking from settings to avoid spurious cache clear on first render
+		lastKnownHashMode = this.settings.hashMode;
 		this.addSettingTab(new LinkColorSettingTab(this.app, this));
 		this.editorExtension = createLinkColorExtension(this);
 		this.registerEditorExtension(this.editorExtension);
@@ -440,7 +449,26 @@ export default class LinkColorPlugin extends Plugin {
 		hashModeScores.clear();
 		isSmartModeEvaluated = false;
 		activeHashMode = "strict-full";
+		// Reset seed tracking to force view update on next render
+		// Setting to -1 ensures next view update will detect seed change
+		lastKnownSeed = -1;
+		// Reset hash mode tracking to force cache invalidation
+		lastKnownHashMode = null;
 		console.log("Color state reset");
+	}
+
+	// Force all open markdown views to re-render their decorations
+	forceViewUpdate() {
+		this.app.workspace.iterateRootLeaves((leaf) => {
+			if (leaf.view instanceof MarkdownView) {
+				// Get the CodeMirror EditorView from the MarkdownView
+				// @ts-expect-error - editor.cm is internal but available
+				const view = leaf.view.editor?.cm as EditorView | undefined;
+				if (view) {
+					view.dispatch({});
+				}
+			}
+		});
 	}
 }
 
@@ -454,9 +482,26 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
 			}
 
 			update(update: ViewUpdate) {
-				if (update.docChanged || update.viewportChanged) {
+				// Check if the seed changed (settings were updated)
+				const currentSeed = plugin.settings.customSeed;
+				const seedChanged = lastKnownSeed !== currentSeed;
+				// Check if hash mode changed (requires cache invalidation)
+				const currentHashMode = plugin.settings.hashMode;
+				const hashModeChanged = lastKnownHashMode !== currentHashMode;
+				
+				// Clear cache when hash mode changes to ensure colors update immediately
+				if (hashModeChanged) {
+					textColorMap.clear();
+					colorUsageMap.clear();
+				}
+				
+				if (update.docChanged || update.viewportChanged || seedChanged || hashModeChanged) {
 					this.decorations = this.buildDecorations(update.view);
 				}
+				
+				// Update the tracked values after processing
+				lastKnownSeed = currentSeed;
+				lastKnownHashMode = currentHashMode;
 			}
 
 			buildDecorations(view: EditorView): DecorationSet {
@@ -597,7 +642,7 @@ function getColorWithHashMode(
 		const rangeKey = isDarkMode
 			? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
 			: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
-		const textKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${rangeKey}-${cleaned}`;
+		const textKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${rangeKey}-${mode}-${cleaned}`;
 		if (textColorMap.has(textKey)) {
 			return textColorMap.get(textKey)!;
 		}
@@ -683,7 +728,7 @@ function getColorWithHashMode(
 		const rangeKey = isDarkMode
 			? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
 			: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
-		const textKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${rangeKey}-${cleaned}`;
+		const textKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${rangeKey}-${mode}-${cleaned}`;
 		textColorMap.set(textKey, finalColor);
 	}
 
@@ -719,11 +764,11 @@ function getColor(
 	// 4. Generate Hashes
 	const seed = settings.customSeed; // <--- GET SEED FROM SETTINGS
 
-	// 3. Check Cache (must include seed and range settings so changing them invalidates cache)
+	// 3. Check Cache (must include hashMode, seed and range settings so changing them invalidates cache)
 	const rangeKey = isDarkMode
 		? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
 		: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
-	const textKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${rangeKey}-${cleaned}`;
+	const textKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${rangeKey}-${settings.hashMode}-${cleaned}`;
 	if (textColorMap.has(textKey)) {
 		return textColorMap.get(textKey)!;
 	}
