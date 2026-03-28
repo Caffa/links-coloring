@@ -31,6 +31,8 @@ const hashModeScores = new Map<HashMode, number>();
 let currentParentFolderPath: string | null = null;
 // Track files that have been opened (to distinguish new file opens from tab switches)
 const openedFiles = new Set<string>();
+// Track which files have been precomputed to avoid redundant work
+const precomputedFiles = new Set<string>();
 // Track last known seed to detect changes - used to force view updates
 // Initialize to -1 (an impossible seed value) to force initial render
 let lastKnownSeed: number = -1;
@@ -184,6 +186,13 @@ async function precomputeFileLinkColors(
 	file: TFile,
 	plugin: LinkColorPlugin,
 ): Promise<void> {
+	const filePath = file.path;
+
+	// Skip if already precomputed (prevents redundant work on file switches)
+	if (precomputedFiles.has(filePath)) {
+		return;
+	}
+
 	try {
 		const content = await plugin.app.vault.cachedRead(file);
 		const links = extractLinksFromContent(content);
@@ -193,6 +202,9 @@ async function precomputeFileLinkColors(
 		for (const link of links) {
 			getColor(link, plugin.settings, isDarkMode);
 		}
+
+		// Mark as precomputed
+		precomputedFiles.add(filePath);
 	} catch (error) {
 		console.warn("Failed to precompute link colors:", error);
 	}
@@ -379,6 +391,13 @@ export default class LinkColorPlugin extends Plugin {
 
 		this.registerEvent(
 			this.app.workspace.on("css-change", () => {
+				// Clear precomputed files so they'll be recomputed with new theme colors
+				precomputedFiles.clear();
+				// Precompute colors for the current active file with new theme
+				const activeFile = this.app.workspace.getActiveFile();
+				if (activeFile) {
+					precomputeFileLinkColors(activeFile, this);
+				}
 				this.app.workspace.updateOptions();
 			}),
 		);
@@ -455,6 +474,7 @@ export default class LinkColorPlugin extends Plugin {
 		textColorMap.clear();
 		colorUsageMap.clear();
 		hashModeScores.clear();
+		precomputedFiles.clear();
 		// Note: Don't clear openedFiles - we want to remember which files
 		// have been opened even after color reset, to distinguish between
 		// "new files" and "switching between already-open tabs"
