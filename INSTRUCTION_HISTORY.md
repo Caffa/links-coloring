@@ -37,3 +37,37 @@ Verification:
 1. Smart/Diverse
 2. Yes.
 3. Continuous scrolling
+
+## 2026-03-28T08:41:29.402Z
+
+Why does the reroll colour not change the color of the links, is it broken?
+
+## 2026-03-28T09:24:48.041Z
+
+Analyze this obsidian plugin for its ability to have links of perceptually diverse colors (no link conflict, do modifications even if same base color) and the speed performance
+
+## 2026-03-28T09:48:17.092Z
+
+What about the speed performance analysis?
+
+Give me suggestions for fixing each bug. Does having my auto change of seed everytime I change parent folder of file, cause lag in any way?
+
+## 2026-03-28T10:10:27.152Z
+
+Bug: Hash mode change doesn't clear cache — Colors don't update until cache eviction or manual re-roll
+
+fix this.
+
+## 2026-03-28T10:37:58.975Z
+
+commit this
+
+## 2026-03-28T12:20:30.875Z
+
+Right now there is an option to reset the colors of the links when the active file's parent folder changes. 
+
+I want to keep this behaviour but make it so that it is (when the active file's parent folder changes AND a new file is opened). So that if I'm just clicking between my already open files, it won't reset the link colours.
+
+## 2026-03-28T12:27:03.261Z
+
+Do a commit

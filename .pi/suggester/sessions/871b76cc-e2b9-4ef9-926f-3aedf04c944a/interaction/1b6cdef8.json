@@ -1,0 +1,22 @@
+{
+  "stateVersion": 9,
+  "pendingNextTurnObservation": {
+    "suggestionTurnId": "1b6cdef8",
+    "suggestionShownAt": "2026-03-28T12:26:11.995Z",
+    "userPromptSubmittedAt": "2026-03-28T12:27:03.258Z",
+    "variantName": "default",
+    "strategy": "compact",
+    "requestedStrategy": "compact"
+  },
+  "steeringHistory": [
+    {
+      "turnId": "1b6cdef8",
+      "suggestedPrompt": "Looks good, thanks!",
+      "actualUserPrompt": "Do a commit",
+      "classification": "changed_course",
+      "similarity": 0.13333333333333333,
+      "timestamp": "2026-03-28T12:27:03.258Z"
+    }
+  ],
+  "turnsSinceLastStalenessCheck": 2
+}

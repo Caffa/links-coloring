@@ -1,0 +1,22 @@
+{
+  "stateVersion": 9,
+  "pendingNextTurnObservation": {
+    "suggestionTurnId": "3206f42f",
+    "suggestionShownAt": "2026-03-28T09:30:24.137Z",
+    "userPromptSubmittedAt": "2026-03-28T09:48:17.089Z",
+    "variantName": "default",
+    "strategy": "compact",
+    "requestedStrategy": "compact"
+  },
+  "steeringHistory": [
+    {
+      "turnId": "3206f42f",
+      "suggestedPrompt": "What about the speed performance analysis?",
+      "actualUserPrompt": "What about the speed performance analysis?\n\nGive me suggestions for fixing each bug. Does having my auto change of seed everytime I change parent folder of file, cause lag in any way?",
+      "classification": "changed_course",
+      "similarity": 0.2875,
+      "timestamp": "2026-03-28T09:48:17.089Z"
+    }
+  ],
+  "turnsSinceLastStalenessCheck": 2
+}

@@ -1,0 +1,14 @@
+{
+  "stateVersion": 9,
+  "lastSuggestion": {
+    "text": "rebuild it",
+    "shownAt": "2026-03-28T08:50:06.170Z",
+    "turnId": "8a12005e",
+    "sourceLeafId": "8a12005e",
+    "variantName": "default",
+    "strategy": "compact",
+    "requestedStrategy": "compact"
+  },
+  "steeringHistory": [],
+  "turnsSinceLastStalenessCheck": 2
+}

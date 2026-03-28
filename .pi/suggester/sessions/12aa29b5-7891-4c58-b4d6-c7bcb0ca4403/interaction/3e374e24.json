@@ -1,0 +1,23 @@
+{
+  "stateVersion": 9,
+  "lastSuggestion": {
+    "text": "push it",
+    "shownAt": "2026-03-28T10:38:16.947Z",
+    "turnId": "3e374e24",
+    "sourceLeafId": "3e374e24",
+    "variantName": "default",
+    "strategy": "compact",
+    "requestedStrategy": "compact"
+  },
+  "steeringHistory": [
+    {
+      "turnId": "cf9f277c",
+      "suggestedPrompt": "commit this",
+      "actualUserPrompt": "commit this",
+      "classification": "accepted_exact",
+      "similarity": 1,
+      "timestamp": "2026-03-28T10:37:58.971Z"
+    }
+  ],
+  "turnsSinceLastStalenessCheck": 3
+}
