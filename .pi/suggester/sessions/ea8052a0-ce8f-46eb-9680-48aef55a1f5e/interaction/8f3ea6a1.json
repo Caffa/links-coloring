@@ -1,0 +1,22 @@
+{
+  "stateVersion": 9,
+  "pendingNextTurnObservation": {
+    "suggestionTurnId": "8f3ea6a1",
+    "suggestionShownAt": "2026-03-28T12:44:24.872Z",
+    "userPromptSubmittedAt": "2026-03-28T12:46:59.039Z",
+    "variantName": "default",
+    "strategy": "compact",
+    "requestedStrategy": "compact"
+  },
+  "steeringHistory": [
+    {
+      "turnId": "8f3ea6a1",
+      "suggestedPrompt": "That's good enough for now.",
+      "actualUserPrompt": "Work on this todo.",
+      "classification": "changed_course",
+      "similarity": 0.17777777777777778,
+      "timestamp": "2026-03-28T12:46:59.039Z"
+    }
+  ],
+  "turnsSinceLastStalenessCheck": 1
+}
