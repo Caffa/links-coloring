@@ -29,6 +29,8 @@ let isSmartModeEvaluated = false;
 const hashModeScores = new Map<HashMode, number>();
 // Track current parent folder path for folder-based re-roll
 let currentParentFolderPath: string | null = null;
+// Track files that have been opened (to distinguish new file opens from tab switches)
+const openedFiles = new Set<string>();
 // Track last known seed to detect changes - used to force view updates
 // Initialize to -1 (an impossible seed value) to force initial render
 let lastKnownSeed: number = -1;
@@ -393,10 +395,13 @@ export default class LinkColorPlugin extends Plugin {
 
 				const newParentPath = file.parent?.path ?? null;
 				const parentChanged = newParentPath !== currentParentFolderPath;
+				const filePath = file.path;
+				const isNewFile = !openedFiles.has(filePath);
 
 				// OPTION 1: Folder-based re-roll
-				// Only re-roll when parent folder changes (not on every file switch)
-				if (this.settings.rerollOnFileChange && parentChanged) {
+				// Re-roll when parent folder changes AND a new file is opened
+				// (not when switching between already-open tabs)
+				if (this.settings.rerollOnFileChange && parentChanged && isNewFile) {
 					// Generate a new random seed
 					const newSeed = Math.floor(Math.random() * 100000) + 1;
 					this.settings.customSeed = newSeed;
@@ -404,7 +409,12 @@ export default class LinkColorPlugin extends Plugin {
 					this.resetColorState();
 					// Update tracked folder
 					currentParentFolderPath = newParentPath;
+					// Mark file as opened (after reset, since reset clears openedFiles)
+					openedFiles.add(filePath);
 					console.log(`Folder changed to: ${newParentPath}, re-rolling colors`);
+				} else {
+					// No reset needed, just mark file as opened
+					openedFiles.add(filePath);
 				}
 
 				// OPTION 2: Pre-process links for smooth scrolling
@@ -425,6 +435,7 @@ export default class LinkColorPlugin extends Plugin {
 		const initialFile = this.app.workspace.getActiveFile();
 		if (initialFile) {
 			currentParentFolderPath = initialFile.parent?.path ?? null;
+			openedFiles.add(initialFile.path);
 			await precomputeFileLinkColors(initialFile, this);
 		}
 	}
@@ -447,6 +458,9 @@ export default class LinkColorPlugin extends Plugin {
 		textColorMap.clear();
 		colorUsageMap.clear();
 		hashModeScores.clear();
+		// Note: Don't clear openedFiles - we want to remember which files
+		// have been opened even after color reset, to distinguish between
+		// "new files" and "switching between already-open tabs"
 		isSmartModeEvaluated = false;
 		activeHashMode = "strict-full";
 		// Reset seed tracking to force view update on next render
