@@ -1,0 +1,23 @@
+{
+  "stateVersion": 9,
+  "lastSuggestion": {
+    "text": "run the build and reload the plugin",
+    "shownAt": "2026-03-27T16:10:23.457Z",
+    "turnId": "1f326293",
+    "sourceLeafId": "1f326293",
+    "variantName": "default",
+    "strategy": "compact",
+    "requestedStrategy": "compact"
+  },
+  "steeringHistory": [
+    {
+      "turnId": "254a6bf4",
+      "suggestedPrompt": "Fix that async bug first, then do the parent folder option.",
+      "actualUserPrompt": "Implement both options and also fix this bug. \n\nVerification:\n1. Smart/Diverse\n2. Yes.\n3. Continuous scrolling",
+      "classification": "changed_course",
+      "similarity": 0.22409028097650852,
+      "timestamp": "2026-03-27T16:05:57.970Z"
+    }
+  ],
+  "turnsSinceLastStalenessCheck": 4
+}

@@ -1,0 +1,22 @@
+{
+  "stateVersion": 9,
+  "pendingNextTurnObservation": {
+    "suggestionTurnId": "254a6bf4",
+    "suggestionShownAt": "2026-03-27T16:04:45.590Z",
+    "userPromptSubmittedAt": "2026-03-27T16:05:57.970Z",
+    "variantName": "default",
+    "strategy": "compact",
+    "requestedStrategy": "compact"
+  },
+  "steeringHistory": [
+    {
+      "turnId": "254a6bf4",
+      "suggestedPrompt": "Fix that async bug first, then do the parent folder option.",
+      "actualUserPrompt": "Implement both options and also fix this bug. \n\nVerification:\n1. Smart/Diverse\n2. Yes.\n3. Continuous scrolling",
+      "classification": "changed_course",
+      "similarity": 0.22409028097650852,
+      "timestamp": "2026-03-27T16:05:57.970Z"
+    }
+  ],
+  "turnsSinceLastStalenessCheck": 2
+}

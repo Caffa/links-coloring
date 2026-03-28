@@ -7,7 +7,7 @@ import {
 	ViewPlugin,
 	type ViewUpdate,
 } from "@codemirror/view";
-import { type App, Plugin, type TFile } from "obsidian";
+import { type App, Plugin, type TFile, type Vault } from "obsidian";
 import { hashPhoneticIpa } from "./phonetic";
 import {
 	DEFAULT_SETTINGS,
@@ -27,16 +27,54 @@ let activeHashMode: HashMode = "strict-full";
 let isSmartModeEvaluated = false;
 // Store evaluated hash modes with their scores
 const hashModeScores = new Map<HashMode, number>();
+// Track current parent folder path for folder-based re-roll
+let currentParentFolderPath: string | null = null;
 
 /**
- * Extract unique wiki-style links from a file
+ * Extract unique wiki-style links from a file (ASYNC VERSION)
  * Returns link targets (the text inside [[...]])
+ * 
+ * FIX: This was previously synchronous but used vault.cachedRead which returns a Promise.
+ * Now properly awaits the async read operation.
  */
-function extractLinksFromFile(file: TFile, vault: any): string[] {
-	const content = vault.cachedRead ? vault.cachedRead(file) : "";
+async function extractLinksFromFileAsync(file: TFile, vault: Vault): Promise<string[]> {
+	try {
+		const content = await vault.cachedRead(file);
+		if (!content) return [];
+
+		// Match [[link]] and [[link|alias]] patterns
+		const linkPattern = /\[\[([^\]]+)\]\]/g;
+		const links: string[] = [];
+		let match: RegExpExecArray | null = null;
+
+		while (true) {
+			match = linkPattern.exec(content);
+			if (match === null) break;
+
+			const linkText = match[1];
+			if (!linkText) continue;
+
+			// Handle aliases: [[target|alias]] → use "target"
+			const pipeIndex = linkText.indexOf("|");
+			const cleanLinkText =
+				pipeIndex !== -1 ? linkText.substring(0, pipeIndex) : linkText;
+			links.push(cleanLinkText);
+		}
+
+		return [...new Set(links)]; // Deduplicate
+	} catch (error) {
+		console.warn("Failed to extract links from file:", file.path, error);
+		return [];
+	}
+}
+
+/**
+ * Extract links synchronously from already-loaded content
+ * Used by buildDecorations for immediate processing
+ */
+function extractLinksFromContent(content: string): string[] {
 	if (!content) return [];
 
-	// Match [[link]] and [[link|alias]] patterns
 	const linkPattern = /\[\[([^\]]+)\]\]/g;
 	const links: string[] = [];
 	let match: RegExpExecArray | null = null;
@@ -48,14 +86,13 @@ function extractLinksFromFile(file: TFile, vault: any): string[] {
 		const linkText = match[1];
 		if (!linkText) continue;
 
-		// Handle aliases: [[target|alias]] → use "target"
 		const pipeIndex = linkText.indexOf("|");
 		const cleanLinkText =
 			pipeIndex !== -1 ? linkText.substring(0, pipeIndex) : linkText;
 		links.push(cleanLinkText);
 	}
 
-	return [...new Set(links)]; // Deduplicate
+	return [...new Set(links)];
 }
 
 /**
@@ -64,6 +101,8 @@ function extractLinksFromFile(file: TFile, vault: any): string[] {
  * - Then adds links from same folder
  * - If < 20 links, moves up folder hierarchy
  * - Continues until 20+ links or reaches vault root
+ * 
+ * FIX: Now properly awaits async file reads
  */
 async function collectSampleLinks(
 	app: App,
@@ -77,13 +116,14 @@ async function collectSampleLinks(
 		if (files.length === 0) return [];
 		const firstFile = files[0];
 		if (!firstFile) return [];
-		return extractLinksFromFile(firstFile, app.vault).slice(0, maxLinks);
+		const links = await extractLinksFromFileAsync(firstFile, app.vault);
+		return links.slice(0, maxLinks);
 	}
 
 	const sampleLinks = new Set<string>();
 
 	// Step 1: Extract links from current active file
-	const currentFileLinks = extractLinksFromFile(activeFile, app.vault);
+	const currentFileLinks = await extractLinksFromFileAsync(activeFile, app.vault);
 	currentFileLinks.forEach((link) => sampleLinks.add(link));
 
 	if (sampleLinks.size >= minLinks) {
@@ -97,7 +137,7 @@ async function collectSampleLinks(
 			.getMarkdownFiles()
 			.filter((f: TFile) => f.parent === folder);
 		for (const file of folderFiles) {
-			const links = extractLinksFromFile(file, app.vault);
+			const links = await extractLinksFromFileAsync(file, app.vault);
 			links.forEach((link) => sampleLinks.add(link));
 			if (sampleLinks.size >= maxLinks) {
 				return Array.from(sampleLinks).slice(0, maxLinks);
@@ -117,7 +157,7 @@ async function collectSampleLinks(
 			.getMarkdownFiles()
 			.filter((f: TFile) => f.parent === currentFolder);
 		for (const file of folderFiles) {
-			const links = extractLinksFromFile(file, app.vault);
+			const links = await extractLinksFromFileAsync(file, app.vault);
 			links.forEach((link) => sampleLinks.add(link));
 			if (sampleLinks.size >= maxLinks) {
 				return Array.from(sampleLinks).slice(0, maxLinks);
@@ -127,6 +167,28 @@ async function collectSampleLinks(
 
 	// Return collected links
 	return Array.from(sampleLinks);
+}
+
+/**
+ * Pre-compute colors for all links in the active file
+ * This eliminates scroll lag by populating the cache before links come into view
+ */
+async function precomputeFileLinkColors(
+	file: TFile,
+	plugin: LinkColorPlugin,
+): Promise<void> {
+	try {
+		const content = await plugin.app.vault.cachedRead(file);
+		const links = extractLinksFromContent(content);
+		const isDarkMode = document.body.classList.contains("theme-dark");
+
+		// Pre-compute colors for all links (populates textColorMap cache)
+		for (const link of links) {
+			getColor(link, plugin.settings, isDarkMode);
+		}
+	} catch (error) {
+		console.warn("Failed to precompute link colors:", error);
+	}
 }
 
 /**
@@ -310,29 +372,51 @@ export default class LinkColorPlugin extends Plugin {
 			}),
 		);
 
-		// Re-roll colors when active file changes (if setting is enabled)
+		// Handle file changes with folder-based re-roll and pre-processing
 		this.registerEvent(
-			this.app.workspace.on("active-leaf-change", (leaf) => {
-				if (this.settings.rerollOnFileChange && leaf) {
-					const view = leaf.view;
-					// Check if this is a file view with a file
-					const file = 'file' in view ? (view as any).file : null;
-					if (file) {
-						// Generate a new random seed
-						const newSeed = Math.floor(Math.random() * 100000) + 1;
-						this.settings.customSeed = newSeed;
-						// Clear the color cache so new colors are generated
-						this.resetColorState();
-						// Update the editor to reflect new colors
-						this.app.workspace.updateOptions();
-					}
+			this.app.workspace.on("active-leaf-change", async (leaf) => {
+				if (!leaf) return;
+
+				const view = leaf.view;
+				// Check if this is a file view with a file
+				const file = 'file' in view ? (view as any).file : null;
+				if (!file) return;
+
+				const newParentPath = file.parent?.path ?? null;
+				const parentChanged = newParentPath !== currentParentFolderPath;
+
+				// OPTION 1: Folder-based re-roll
+				// Only re-roll when parent folder changes (not on every file switch)
+				if (this.settings.rerollOnFileChange && parentChanged) {
+					// Generate a new random seed
+					const newSeed = Math.floor(Math.random() * 100000) + 1;
+					this.settings.customSeed = newSeed;
+					// Clear the color cache so new colors are generated
+					this.resetColorState();
+					// Update tracked folder
+					currentParentFolderPath = newParentPath;
+					console.log(`Folder changed to: ${newParentPath}, re-rolling colors`);
 				}
+
+				// OPTION 2: Pre-process links for smooth scrolling
+				// Pre-compute colors for all links in the new file before user scrolls
+				await precomputeFileLinkColors(file, this);
+
+				// Update the editor to reflect new colors
+				this.app.workspace.updateOptions();
 			}),
 		);
 
 		// Evaluate smart mode on load if selected
 		if (this.settings.hashMode === "smart") {
 			evaluateSmartHashMode(this);
+		}
+
+		// Pre-compute colors for initially active file
+		const initialFile = this.app.workspace.getActiveFile();
+		if (initialFile) {
+			currentParentFolderPath = initialFile.parent?.path ?? null;
+			await precomputeFileLinkColors(initialFile, this);
 		}
 	}
 

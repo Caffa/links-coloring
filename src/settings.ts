@@ -678,9 +678,9 @@ export class LinkColorSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Re-roll on file change")
+			.setName("Re-roll on folder change")
 			.setDesc(
-				"Automatically generate new colors when switching to a different file. Helps avoid color collisions between different links.",
+				"Automatically generate new colors when switching to a different folder. Files within the same folder maintain consistent link colors for smoother scrolling.",
 			)
 			.addToggle((toggle) =>
 				toggle

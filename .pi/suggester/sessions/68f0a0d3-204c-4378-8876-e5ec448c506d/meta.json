@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "sessionId": "68f0a0d3-204c-4378-8876-e5ec448c506d",
+  "sessionFile": "/Users/caffae/.pi/agent/sessions/--Users-caffae-Notes-TestPlugin-.obsidian-plugins-links-coloring--/2026-03-26T12-09-22-929Z_68f0a0d3-204c-4378-8876-e5ec448c506d.jsonl",
+  "cwd": "/Users/caffae/Notes/TestPlugin/.obsidian/plugins/links-coloring",
+  "ignoreLegacyPiSessionEntries": true,
+  "legacyMigration": {
+    "performedAt": "2026-03-26T12:09:22.961Z",
+    "importedLegacyEntries": false,
+    "legacyStateEntryCount": 0,
+    "legacyUsageEntryCount": 0,
+    "note": "Legacy suggester-state/suggester-usage pi session entries were imported once into extension-owned storage and are ignored afterwards."
+  }
+}
