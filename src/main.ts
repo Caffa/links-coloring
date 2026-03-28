@@ -420,9 +420,6 @@ export default class LinkColorPlugin extends Plugin {
 				// OPTION 2: Pre-process links for smooth scrolling
 				// Pre-compute colors for all links in the new file before user scrolls
 				await precomputeFileLinkColors(file, this);
-
-				// Update the editor to reflect new colors
-				this.app.workspace.updateOptions();
 			}),
 		);
 
