@@ -38,6 +38,46 @@ const precomputedFiles = new Set<string>();
 let lastKnownSeed: number = -1;
 // Track last known hash mode to detect changes and invalidate cache
 let lastKnownHashMode: HashMode | null = null;
+// Threshold for normalizing color usage counts (prevents unbounded growth and convergence)
+const COLOR_USAGE_NORMALIZE_THRESHOLD = 50;
+
+/**
+ * Normalize color usage counts when they grow too large.
+ * When all palette indices have high usage counts, load balancing becomes pointless
+ * because everything is "tied". This function caps the relative differences by
+ * subtracting the minimum usage from all counts, preventing unbounded growth
+ * while preserving relative ordering.
+ */
+function normalizeColorUsage(
+	palette: string,
+	isDarkMode: boolean,
+	seed: number,
+	paletteSize: number,
+): void {
+	// Check if any usage count exceeds the threshold
+	let minUsage = Number.MAX_SAFE_INTEGER;
+	let maxUsage = 0;
+	for (let i = 0; i < paletteSize; i++) {
+		const key = `${palette}-${isDarkMode ? "dark" : "light"}-${seed}-${i}`;
+		const usage = colorUsageMap.get(key) || 0;
+		minUsage = Math.min(minUsage, usage);
+		maxUsage = Math.max(maxUsage, usage);
+	}
+
+	// Only normalize when the minimum usage exceeds the threshold
+	// (meaning all colors have been used many times)
+	if (minUsage < COLOR_USAGE_NORMALIZE_THRESHOLD) return;
+
+	// Subtract the minimum from all counts to keep relative ordering
+	// while preventing unbounded growth
+	for (let i = 0; i < paletteSize; i++) {
+		const key = `${palette}-${isDarkMode ? "dark" : "light"}-${seed}-${i}`;
+		const usage = colorUsageMap.get(key);
+		if (usage !== undefined) {
+			colorUsageMap.set(key, usage - minUsage);
+		}
+	}
+}
 
 /**
  * Extract unique wiki-style links from a file (ASYNC VERSION)
@@ -249,9 +289,10 @@ function getRandomColor(
 	const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
 	const paletteSize = colorList.length;
 
-	// Load Balancing: find least used color
+	// Load Balancing: find least used color(s), then random tiebreaker among ties
 	let bestIndex = -1;
 	let minUsage = Number.MAX_SAFE_INTEGER;
+	const candidates: number[] = []; // indices tied at minUsage
 	const startOffset = hash % paletteSize;
 
 	for (let i = 0; i < paletteSize; i++) {
@@ -261,15 +302,31 @@ function getRandomColor(
 
 		if (usage < minUsage) {
 			minUsage = usage;
-			bestIndex = idx;
+			candidates.length = 0;
+			candidates.push(idx);
+		} else if (usage === minUsage) {
+			candidates.push(idx);
 		}
+	}
+
+	// Random tiebreaker among equally-used colors (prevents deterministic convergence)
+	if (candidates.length === 1) {
+		bestIndex = candidates[0]!;
+	} else {
+		// Use the hash to deterministically but uniformly pick among tied candidates
+		bestIndex = candidates[Math.abs(hash) % candidates.length]!;
 	}
 
 	// 6. Register Usage
 	const selectedKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${bestIndex}`;
-	const currentUsageCount = colorUsageMap.get(selectedKey) || 0;
+	let currentUsageCount = colorUsageMap.get(selectedKey) || 0;
 	colorUsageMap.set(selectedKey, currentUsageCount + 1);
 
+	// Normalize usage counts when they grow too large (prevents convergence
+	// where all indices are tied at high usage and load balancing becomes useless)
+	normalizeColorUsage(settings.palette, isDarkMode, seed, paletteSize);
+
+	const actualUsageCount = currentUsageCount;
 	const baseColor = colorList[bestIndex]!;
 
 	// 7. Apply Hue/Shade Adjustments (same as other modes)
@@ -277,7 +334,7 @@ function getRandomColor(
 	const finalColor = applyAggressiveVariant(
 		baseColor,
 		variantSeed,
-		currentUsageCount,
+		actualUsageCount,
 		isDarkMode,
 		settings,
 	);
@@ -721,9 +778,10 @@ function getColorWithHashMode(
 	const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
 	const paletteSize = colorList.length;
 
-	// Load Balancing
+	// Load Balancing: find least used color(s), then random tiebreaker among ties
 	let bestIndex = -1;
 	let minUsage = Number.MAX_SAFE_INTEGER;
+	const candidatesColorWith: number[] = []; // indices tied at minUsage
 	const startOffset = hash % paletteSize;
 
 	for (let i = 0; i < paletteSize; i++) {
@@ -733,14 +791,27 @@ function getColorWithHashMode(
 
 		if (usage < minUsage) {
 			minUsage = usage;
-			bestIndex = idx;
+			candidatesColorWith.length = 0;
+			candidatesColorWith.push(idx);
+		} else if (usage === minUsage) {
+			candidatesColorWith.push(idx);
 		}
+	}
+
+	// Random tiebreaker among equally-used colors (prevents deterministic convergence)
+	if (candidatesColorWith.length === 1) {
+		bestIndex = candidatesColorWith[0]!;
+	} else {
+		bestIndex = candidatesColorWith[Math.abs(hash) % candidatesColorWith.length]!;
 	}
 
 	// Register Usage
 	const selectedKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${bestIndex}`;
 	const currentUsageCount = colorUsageMap.get(selectedKey) || 0;
 	colorUsageMap.set(selectedKey, currentUsageCount + 1);
+
+	// Normalize usage counts when they grow too large
+	normalizeColorUsage(settings.palette, isDarkMode, seed, paletteSize);
 
 	const baseColor = colorList[bestIndex]!;
 
@@ -846,11 +917,12 @@ function getColor(
 	const paletteSize = colorList.length;
 
 	// --- FIX 1: GLOBAL LOAD BALANCING ---
-	// Instead of checking 3 spots, scan the WHOLE palette to find the absolute least used color.
-	// If there is a tie, use the hash to deterministically break it.
+	// Instead of checking 3 spots, scan the WHOLE palette to find the least used color(s).
+	// When there's a tie, use hash-based random tiebreaker to prevent deterministic convergence.
 
 	let bestIndex = -1;
 	let minUsage = Number.MAX_SAFE_INTEGER;
+	const candidatesGetColor: number[] = []; // indices tied at minUsage
 
 	// We create a randomized start point based on hash so we don't always fill index 0 first
 	const startOffset = hash % paletteSize;
@@ -863,14 +935,27 @@ function getColor(
 
 		if (usage < minUsage) {
 			minUsage = usage;
-			bestIndex = idx;
+			candidatesGetColor.length = 0;
+			candidatesGetColor.push(idx);
+		} else if (usage === minUsage) {
+			candidatesGetColor.push(idx);
 		}
+	}
+
+	// Hash-based tiebreaker among equally-used colors (prevents deterministic convergence)
+	if (candidatesGetColor.length === 1) {
+		bestIndex = candidatesGetColor[0]!;
+	} else {
+		bestIndex = candidatesGetColor[Math.abs(hash) % candidatesGetColor.length]!;
 	}
 
 	// 6. Register Usage
 	const selectedKey = `${settings.palette}-${isDarkMode ? "dark" : "light"}-${seed}-${bestIndex}`;
 	const currentUsageCount = colorUsageMap.get(selectedKey) || 0;
 	colorUsageMap.set(selectedKey, currentUsageCount + 1);
+
+	// Normalize usage counts when they grow too large (prevents convergence)
+	normalizeColorUsage(settings.palette, isDarkMode, seed, paletteSize);
 
 	const baseColor = colorList[bestIndex]!;
 
@@ -913,8 +998,10 @@ function applyAggressiveVariant(
 	// If this is the 1st time using this base color: almost no shift.
 	// 2nd time: shift Left. 3rd time: shift Right. 4th: shift Left more.
 	// This creates a "fan" effect around the base color.
-	const spreadDirection = usageCount % 2 === 0 ? 1 : -1;
-	const spreadMagnitude = Math.ceil(usageCount / 2) * 15; // 15, 30, 45 degree jumps per usage
+	// Cap usageCount to prevent extreme shifts when many links share palette slots
+	const cappedUsageCount = Math.min(usageCount, 6);
+	const spreadDirection = cappedUsageCount % 2 === 0 ? 1 : -1;
+	const spreadMagnitude = Math.ceil(cappedUsageCount / 2) * 15; // 15, 30, 45 degree jumps per usage
 
 	// Random noise (kept smaller to preserve the "Base" color identity slightly)
 	const randomHueNoise = (rand(3) - 0.5) * 20; // +/- 10 degrees random wobble
