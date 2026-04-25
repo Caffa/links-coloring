@@ -99,6 +99,14 @@ npm run build
 - Create a GitHub release whose tag exactly matches `manifest.json`'s `version`. Do not use a leading `v`.
 - Attach `manifest.json`, `main.js`, and `styles.css` (if present) to the release as individual assets.
 - After the initial release, follow the process to add/update your plugin in the community catalog as required.
+- **Always run `sendToNovelVault.sh` after committing changes and before creating a release.** This builds the plugin and copies it to the local vaults (Novel-Writing and ZettelPublish) so changes can be tested immediately:
+  ```bash
+  bash sendToNovelVault.sh
+  ```
+  Run this script:
+  - After every set of changes is committed (before or after git commit, but before any release).
+  - Before running `prepareForGitRelease.sh` to create a GitHub release.
+  - Any time you want to verify that the build deploys correctly to the local vaults.
 
 ## Security, privacy, and compliance
 
@@ -151,6 +159,7 @@ Follow Obsidian's **Developer Policies** and **Plugin Guidelines**. In particula
 - Provide defaults and validation in settings.
 - Write idempotent code paths so reload/unload doesn't leak listeners or intervals.
 - Use `this.register*` helpers for everything that needs cleanup.
+- Run `bash sendToNovelVault.sh` after every commit and before any release to deploy the build to local vaults for testing.
 
 **Don't**
 - Introduce network calls without an obvious user-facing reason and documentation.

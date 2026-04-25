@@ -145,6 +145,42 @@ function extractLinksFromContent(content: string): string[] {
 }
 
 /**
+ * Extract links with their occurrence counts from content.
+ * Returns a Map of link text → count, sorted by count descending.
+ * Links that appear more times are listed first, so they can claim
+ * the most distinct palette colors during priority precomputation.
+ */
+function extractLinksWithCounts(content: string): Map<string, number> {
+	if (!content) return new Map();
+
+	const linkPattern = /\[\[([^\]]+)\]\]/g;
+	const counts = new Map<string, number>();
+	let match: RegExpExecArray | null = null;
+
+	while (true) {
+		match = linkPattern.exec(content);
+		if (match === null) break;
+
+		const linkText = match[1];
+		if (!linkText) continue;
+
+		const pipeIndex = linkText.indexOf("|");
+		const cleanLinkText =
+			pipeIndex !== -1 ? linkText.substring(0, pipeIndex) : linkText;
+		counts.set(cleanLinkText, (counts.get(cleanLinkText) || 0) + 1);
+	}
+
+	// Sort by count descending (most frequent first)
+	const sorted = new Map<string, number>();
+	const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+	for (const [link, count] of entries) {
+		sorted.set(link, count);
+	}
+
+	return sorted;
+}
+
+/**
  * Collect sample links from current folder context
  * - Starts with links from current active file
  * - Then adds links from same folder
@@ -247,6 +283,42 @@ async function precomputeFileLinkColors(
 		precomputedFiles.add(filePath);
 	} catch (error) {
 		console.warn("Failed to precompute link colors:", error);
+	}
+}
+
+/**
+ * Pre-compute colors for links in a file, processing them by frequency.
+ * Links with more occurrences are processed first, so they claim the most
+ * distinct colors from the load-balancing algorithm. This is used for
+ * priority files (e.g., "Chapter - *" pages) to ensure their most
+ * frequently-appearing links get the best color distribution.
+ */
+async function precomputeFileLinkColorsByFrequency(
+	file: TFile,
+	plugin: LinkColorPlugin,
+): Promise<void> {
+	const filePath = file.path;
+
+	// Skip if already precomputed (prevents redundant work on file switches)
+	if (precomputedFiles.has(filePath)) {
+		return;
+	}
+
+	try {
+		const content = await plugin.app.vault.cachedRead(file);
+		const linksWithCounts = extractLinksWithCounts(content);
+		const isDarkMode = document.body.classList.contains("theme-dark");
+
+		// Process links in order of frequency (most frequent first)
+		// This gives the most-occurring links the freshest palette colors
+		for (const [link] of linksWithCounts) {
+			getColor(link, plugin.settings, isDarkMode);
+		}
+
+		// Mark as precomputed
+		precomputedFiles.add(filePath);
+	} catch (error) {
+		console.warn("Failed to precompute link colors by frequency:", error);
 	}
 }
 
@@ -488,6 +560,9 @@ export default class LinkColorPlugin extends Plugin {
 					// Mark file as opened (after reset, since reset clears openedFiles)
 					openedFiles.add(filePath);
 					console.log(`Folder changed to: ${newParentPath}, re-rolling colors`);
+
+					// Prioritize Chapter-prefixed files first for best color distribution
+					await this.priorityPrecompute();
 				} else {
 					// No reset needed, just mark file as opened
 					openedFiles.add(filePath);
@@ -495,6 +570,8 @@ export default class LinkColorPlugin extends Plugin {
 
 				// OPTION 2: Pre-process links for smooth scrolling
 				// Pre-compute colors for all links in the new file before user scrolls
+				// (priorityPrecompute already handles some files, but this ensures
+				// the active file is always precomputed even if no re-roll occurred)
 				await precomputeFileLinkColors(file, this);
 			}),
 		);
@@ -545,8 +622,50 @@ export default class LinkColorPlugin extends Plugin {
 		console.log("Color state reset");
 	}
 
+	/**
+	 * Pre-compute link colors for priority files before other open tabs.
+	 * Files whose names start with the priorityFilePrefix are processed first,
+	 * giving them the best color distribution from the load-balancing algorithm.
+	 * Within priority files, links with more occurrences are processed first,
+	 * so the most frequent links claim the most distinct colors.
+	 */
+	async priorityPrecompute() {
+		const prefix = this.settings.priorityFilePrefix?.trim();
+		if (!prefix) return;
+
+		const priorityFiles: TFile[] = [];
+		const otherFiles: TFile[] = [];
+
+		// Collect all open markdown files, splitting into priority and other
+		this.app.workspace.iterateRootLeaves((leaf) => {
+			if (leaf.view instanceof MarkdownView) {
+				const file = leaf.view.file;
+				if (file) {
+					const basename = file.basename;
+					if (basename.startsWith(prefix)) {
+						priorityFiles.push(file);
+					} else {
+						otherFiles.push(file);
+					}
+				}
+			}
+		});
+
+		// Pre-compute priority files first with frequency-based ordering,
+		// so links that appear most often get the most distinct colors
+		for (const file of priorityFiles) {
+			await precomputeFileLinkColorsByFrequency(file, this);
+		}
+		for (const file of otherFiles) {
+			await precomputeFileLinkColors(file, this);
+		}
+	}
+
 	// Force all open markdown views to re-render their decorations
-	forceViewUpdate() {
+	async forceViewUpdate() {
+		// Pre-compute priority files first so they get the best color distribution
+		await this.priorityPrecompute();
+
 		this.app.workspace.iterateRootLeaves((leaf) => {
 			if (leaf.view instanceof MarkdownView) {
 				// Get the CodeMirror EditorView from the MarkdownView

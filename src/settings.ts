@@ -423,6 +423,7 @@ export interface LinkColorSettings {
 	hashMode: HashMode;
 	customSeed: number; // New setting for the hash seed
 	rerollOnFileChange: boolean; // Automatically re-roll colors when switching files
+	priorityFilePrefix: string; // Process files matching this prefix first on re-roll
 	darkSaturationMin: number;
 	darkSaturationMax: number;
 	darkLightnessMin: number;
@@ -439,6 +440,7 @@ export const DEFAULT_SETTINGS: LinkColorSettings = {
 	hashMode: "smart",
 	customSeed: 5381, // Default DJB2 seed
 	rerollOnFileChange: false, // Automatically re-roll colors when switching files
+	priorityFilePrefix: "Chapter - ", // Process files matching this prefix first on re-roll
 	darkSaturationMin: 30,
 	darkSaturationMax: 65,
 	darkLightnessMin: 50,
@@ -669,7 +671,7 @@ export class LinkColorSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 
 						// Force all open views to update their colors immediately
-						this.plugin.forceViewUpdate();
+						await this.plugin.forceViewUpdate();
 					}),
 			)
 			.addButton((btn) =>
@@ -677,11 +679,11 @@ export class LinkColorSettingTab extends PluginSettingTab {
 					.setButtonText("Reset all colors")
 					.setTooltip("Reset color state and re-generate all colors")
 					.setWarning()
-					.onClick(() => {
+					.onClick(async () => {
 						this.plugin.resetColorState();
 						this.display();
 						// Force all open views to update their colors immediately
-						this.plugin.forceViewUpdate();
+						await this.plugin.forceViewUpdate();
 					}),
 			);
 
@@ -695,6 +697,21 @@ export class LinkColorSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.rerollOnFileChange)
 					.onChange(async (value) => {
 						this.plugin.settings.rerollOnFileChange = value;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Priority file prefix")
+			.setDesc(
+				"When re-rolling colors, files whose names start with this prefix are processed first. This gives them the best color distribution before other files claim colors. Leave empty to disable.",
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("Chapter - ")
+					.setValue(this.plugin.settings.priorityFilePrefix)
+					.onChange(async (value) => {
+						this.plugin.settings.priorityFilePrefix = value;
 						await this.plugin.saveSettings();
 					}),
 			);
