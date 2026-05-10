@@ -30,8 +30,8 @@ function wordToPhonetic(word: string): string {
 	while (i < word.length) {
 		const raw = word[i];
 		if (raw === undefined) break;
-		const c = raw.toLowerCase();
-		const n = next(0);
+	const c = raw.toLowerCase();
+	const n = next(1); // Next character (was next(0) which was current char — major bug fix)
 
 		// --- Digraphs (order matters: longer first) ---
 		if (c === 'c' && n === 'h') {
@@ -71,7 +71,10 @@ function wordToPhonetic(word: string): string {
 			continue;
 		}
 		if (c === 'i' && n === 'g' && (word[i + 2] ?? '') === 'h') {
-			out.push('i'); // "igh" → long i (e.g. "light" → "lit")
+			// Bug 10 fix: Use uppercase 'I' to distinguish "igh" digraph from
+			// plain 'i', and append word length so "high"→"hI4" ≠ "sigh"→"sI4"
+			out.push('I');
+			out.push(String(word.length));
 			i += 3;
 			continue;
 		}
@@ -165,14 +168,12 @@ export function textToPhoneticSignature(text: string): string {
 
 /**
  * DJB2-style hash of a string with seed (for use by main.ts).
+ * Delegates to the improved version in color-utils.ts which includes
+ * a MurmurHash3 finalizer for better avalanche properties (Bug 7).
  */
+import { djb2Hash as _djb2Hash } from "./color-utils";
 function djb2Hash(str: string, seed: number): number {
-	let hash = seed;
-	for (let i = 0; i < str.length; i++) {
-		hash = ((hash << 5) + hash) + str.charCodeAt(i);
-		hash = hash & hash;
-	}
-	return Math.abs(hash);
+	return _djb2Hash(str, seed);
 }
 
 /**

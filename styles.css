@@ -81,3 +81,256 @@
     display: none;
 }
 
+/* ===== Log Viewer Modal ===== */
+
+.link-color-log-viewer h2 {
+    margin-bottom: 8px;
+}
+
+.log-stats-bar {
+    font-size: 0.85em;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    background: var(--background-secondary);
+    border-radius: 6px;
+}
+
+.log-filter-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.log-search-input {
+    flex: 1;
+    min-width: 150px;
+    padding: 6px 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-size: 0.9em;
+}
+
+.log-filter-select {
+    padding: 6px 8px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-size: 0.85em;
+}
+
+.log-entries-container {
+    max-height: 50vh;
+    overflow-y: auto;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    background: var(--background-primary-alt);
+    font-family: var(--font-monospace);
+    font-size: 0.82em;
+    line-height: 1.5;
+}
+
+.log-entry {
+    padding: 4px 10px;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.log-entry:last-child {
+    border-bottom: none;
+}
+
+.log-entry-header {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.log-time {
+    color: var(--text-muted);
+    font-size: 0.9em;
+    flex-shrink: 0;
+}
+
+.log-level-badge-error {
+    color: #ef4444;
+    font-weight: bold;
+}
+
+.log-level-badge-warn {
+    color: #f59e0b;
+    font-weight: bold;
+}
+
+.log-level-badge-info {
+    color: #3b82f6;
+}
+
+.log-level-badge-debug {
+    color: var(--text-faint);
+}
+
+.log-category {
+    color: var(--text-muted);
+    font-size: 0.85em;
+    background: var(--background-secondary);
+    padding: 1px 5px;
+    border-radius: 3px;
+}
+
+.log-entry-msg {
+    margin-top: 2px;
+    word-break: break-word;
+}
+
+.log-duration {
+    margin-left: 8px;
+    font-size: 0.9em;
+    color: var(--text-muted);
+}
+
+.log-duration-slow {
+    color: #ef4444;
+    font-weight: bold;
+}
+
+.log-entry-data {
+    margin-top: 4px;
+    padding: 6px 10px;
+    background: var(--background-secondary);
+    border-radius: 4px;
+    white-space: pre-wrap;
+    font-size: 0.85em;
+    color: var(--text-muted);
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.log-truncation-notice {
+    text-align: center;
+    padding: 8px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.log-empty {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-muted);
+}
+
+.log-actions-row {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+}
+
+/* ===== Link Color Override Rules ===== */
+/* These rules ensure that decorated links retain their assigned colors
+ * even when themes or Obsidian's built-in CSS try to override them.
+ *
+ * The ViewPlugin decorations add .consistent-link-target and
+ * .consistent-link-alias classes to <span> elements in the editor,
+ * along with inline style attributes like:
+ *   style="color: #FF5252 !important; -webkit-text-fill-color: #FF5252 !important"
+ *
+ * These stylesheet rules provide additional specificity to help inline
+ * styles win against theme overrides, especially on mobile WebKit where
+ * -webkit-text-fill-color cascading behavior differs from desktop.
+ *
+ * CRITICAL: We do NOT set color/ -webkit-text-fill-color here because that
+ * would conflict with the inline styles set by the JS code. Instead, these
+ * rules force other properties that could interfere with color rendering.
+ */
+
+/* In the editor (Source + Live Preview), ensure our decorated spans
+ * override the default Obsidian internal-link color. */
+.cm-line .consistent-link-target,
+.cm-line .consistent-link-alias,
+.cm-hmd-internal-link .consistent-link-target,
+.cm-hmd-internal-link .consistent-link-alias {
+    /* Inline styles from JS set color/ -webkit-text-fill-color with !important.
+     * These rules ensure no other CSS property interferes. */
+    background-color: transparent !important;
+}
+
+/* In reading view, ensure our inline styles on <a> tags win.
+ * Some themes set color via --link-color CSS variable which cascades. */
+.markdown-preview-view a.internal-link[style],
+.markdown-preview-view a[data-href][style],
+.markdown-preview-view a.is-unresolved[style] {
+    /* The [style] selector increases specificity for links that have
+     * been colored by our plugin, ensuring theme CSS variables don't
+     * override our inline color declarations. Nothing extra needed here
+     * since inline !important already wins. */
+}
+
+/* ===== Mobile-Specific Styles ===== */
+/* Mobile WebKit requires smooth transitions when applying link colors
+ * to prevent visible flickering during scroll and rapid navigation. */
+.is-mobile a.internal-link,
+.is-mobile a[data-href],
+.is-mobile a.is-unresolved {
+    transition: color 0.15s ease, -webkit-text-fill-color 0.15s ease;
+}
+
+/* Mobile: ensure editor decorations render with correct colors.
+ * Mobile WebKit sometimes fails to repaint inline styles on
+ * CodeMirror decorations, so we add a rule that forces the browser
+ * to respect the inline color declarations. */
+.is-mobile .cm-line .consistent-link-target,
+.is-mobile .cm-line .consistent-link-alias {
+    /* Force a repaint trigger for mobile WebKit */
+    will-change: color, -webkit-text-fill-color;
+}
+
+/* Mobile settings panel adjustments */
+.is-mobile .link-color-preview-container {
+    gap: 8px;
+    padding: 10px;
+}
+
+.is-mobile .link-color-preview-box {
+    width: 30px;
+    height: 30px;
+}
+
+.is-mobile .link-color-mode-description {
+    font-size: 0.85em;
+    padding-left: 6px;
+    margin-bottom: 12px;
+}
+
+/* Mobile log viewer — larger touch targets and iOS zoom prevention */
+.is-mobile .log-search-input {
+    min-width: 120px;
+    font-size: 16px; /* Prevent iOS zoom on input focus */
+}
+
+.is-mobile .log-filter-select {
+    font-size: 16px; /* Prevent iOS zoom */
+    min-height: 36px; /* Larger touch target */
+}
+
+.is-mobile .log-actions-row {
+    flex-wrap: wrap;
+}
+
+.is-mobile .log-actions-row button {
+    flex: 1;
+    min-height: 40px; /* Touch-friendly buttons */
+}
+
+.is-mobile .log-entries-container {
+    max-height: 40vh; /* Smaller viewport on mobile */
+    font-size: 0.9em;
+}
+
+.is-mobile .log-entry {
+    padding: 6px 10px; /* Larger touch area */
+}
+

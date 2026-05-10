@@ -1,5 +1,6 @@
 import { type App, PluginSettingTab, Setting } from "obsidian";
 import type LinkColorPlugin from "./main";
+import { type LogCategory, ALL_CATEGORIES } from "./logger";
 
 // --- 1. DEFINED PALETTES ---
 // The palette should have distinctly different colors (that are different in hue instead of saturation or lightness). They should alternate between Warm and Cool colors, neighbors in your array should be >90° apart on the color wheel.
@@ -432,6 +433,11 @@ export interface LinkColorSettings {
 	lightSaturationMax: number;
 	lightLightnessMin: number;
 	lightLightnessMax: number;
+	// --- Logging settings ---
+	loggingEnabled: boolean;
+	logLevel: "debug" | "info" | "warn" | "error";
+	logMaxEntries: number;
+	logCategories: LogCategory[];
 }
 
 export const DEFAULT_SETTINGS: LinkColorSettings = {
@@ -449,6 +455,11 @@ export const DEFAULT_SETTINGS: LinkColorSettings = {
 	lightSaturationMax: 95,
 	lightLightnessMin: 20,
 	lightLightnessMax: 50,
+	// --- Logging defaults ---
+	loggingEnabled: false,
+	logLevel: "info",
+	logMaxEntries: 500,
+	logCategories: [...ALL_CATEGORIES],
 };
 
 export const HASH_MODE_DESCRIPTIONS: Record<
@@ -876,7 +887,146 @@ export class LinkColorSettingTab extends PluginSettingTab {
 						}),
 				);
 		}
-	}
+
+		// --- GROUP 5: DEBUG LOGGING ---
+		new Setting(containerEl).setName("Debug logging").setHeading();
+
+		new Setting(containerEl)
+			.setName("Enable logging")
+			.setDesc(
+				"Enable structured logging for debugging. Logs are kept in memory and can be exported for review. Essential for debugging on mobile where DevTools are unavailable.",
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.loggingEnabled)
+					.onChange(async (value) => {
+						this.plugin.settings.loggingEnabled = value;
+						await this.plugin.saveSettings();
+						this.plugin.applyLoggingSettings();
+					}),
+			);
+
+		if (this.plugin.settings.loggingEnabled) {
+			new Setting(containerEl)
+				.setName("Log level")
+				.setDesc("Minimum log level to record. Debug records everything; Error only records errors.")
+				.addDropdown((dropdown) => {
+					dropdown
+						.addOption("debug", "Debug (everything)")
+						.addOption("info", "Info")
+						.addOption("warn", "Warn")
+						.addOption("error", "Error only")
+						.setValue(this.plugin.settings.logLevel)
+						.onChange(async (value) => {
+							this.plugin.settings.logLevel = value as LinkColorSettings["logLevel"];
+							await this.plugin.saveSettings();
+							this.plugin.applyLoggingSettings();
+						});
+				});
+
+			new Setting(containerEl)
+				.setName("Max log entries")
+				.setDesc("Maximum number of log entries to keep in memory. Older entries are evicted.")
+				.addSlider((slider) =>
+					slider
+						.setLimits(100, 2000, 100)
+						.setValue(this.plugin.settings.logMaxEntries)
+						.setDynamicTooltip()
+						.onChange(async (value) => {
+							this.plugin.settings.logMaxEntries = value;
+							await this.plugin.saveSettings();
+							this.plugin.applyLoggingSettings();
+						}),
+				);
+
+			new Setting(containerEl)
+				.setName("Log categories")
+				.setDesc("Select which categories to log. Uncheck to reduce noise.")
+				.addDropdown((dropdown) => {
+					// For simplicity, we toggle all categories at once
+					// A multi-select would be better but Obsidian doesn't have one built-in
+					dropdown
+						.addOption("all", "All categories")
+						.addOption("lifecycle+error", "Lifecycle + Error only")
+						.addOption("performance+error", "Performance + Error only")
+						.addOption("error", "Error only")
+						.setValue(
+							this.plugin.settings.logCategories.length === ALL_CATEGORIES.length
+								? "all"
+								: this.plugin.settings.logCategories.includes("performance")
+									? "performance+error"
+									: this.plugin.settings.logCategories.includes("lifecycle")
+										? "lifecycle+error"
+										: "error",
+						)
+						.onChange(async (value) => {
+							switch (value) {
+								case "all":
+									this.plugin.settings.logCategories = [...ALL_CATEGORIES];
+									break;
+								case "lifecycle+error":
+									this.plugin.settings.logCategories = ["lifecycle", "error"];
+									break;
+								case "performance+error":
+									this.plugin.settings.logCategories = ["performance", "error"];
+									break;
+								case "error":
+									this.plugin.settings.logCategories = ["error"];
+									break;
+							}
+							await this.plugin.saveSettings();
+							this.plugin.applyLoggingSettings();
+						});
+				});
+
+			// Stats summary
+			const stats = this.plugin.getLoggerStats();
+			if (stats.totalEntries > 0) {
+				const statsEl = containerEl.createDiv({
+					cls: "link-color-mode-description",
+				});
+				const cacheInfo =
+					stats.cacheHitRate !== null ? ` | Cache hit rate: ${stats.cacheHitRate}%` : "";
+				statsEl.textContent = `${stats.totalEntries} log entries${cacheInfo}`;
+			}
+
+			new Setting(containerEl)
+				.setName("View logs")
+				.setDesc("Open a modal to browse, search, and filter log entries.")
+				.addButton((btn) =>
+					btn.setButtonText("Open log viewer").onClick(() => {
+						this.plugin.openLogViewer();
+					}),
+				);
+
+			new Setting(containerEl)
+				.setName("Export logs")
+				.setDesc("Save logs as a JSON file in your vault for AI agent review.")
+				.addButton((btn) =>
+					btn.setButtonText("Export to file").onClick(async () => {
+						await this.plugin.exportLogsToFile();
+					}),
+				)
+				.addButton((btn) =>
+					btn.setButtonText("Copy to clipboard").onClick(async () => {
+						await this.plugin.copyLogsToClipboard();
+					}),
+				);
+
+			new Setting(containerEl)
+				.setName("Clear logs")
+				.setDesc("Clear all in-memory log entries.")
+				.addButton((btn) =>
+					btn
+						.setButtonText("Clear logs")
+						.setWarning()
+						.onClick(() => {
+							this.plugin.clearLogs();
+							this.display(); // Refresh to hide stats
+						}),
+				);
+		}
+		}
 
 	updatePreview() {
 		this.previewEl.empty();
