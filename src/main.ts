@@ -795,6 +795,18 @@ export default class LinkColorPlugin extends Plugin {
 					openedFiles.add(filePath);
 				}
 
+				// Bug fix: Always update currentParentFolderPath, not just on re-roll.
+				// This ensures folder tracking stays accurate even when rerollOnFileChange is false.
+				// When disabled, we still need to track where we are so that if the user later
+				// enables rerollOnFileChange, it will correctly detect folder changes.
+				if (currentParentFolderPath !== newParentPath) {
+					currentParentFolderPath = newParentPath;
+					log.debug("lifecycle", "Updated folder tracking", {
+						currentParentFolderPath,
+						filePath,
+					});
+				}
+
 				// OPTION 2: Pre-process links for smooth scrolling
 				// Pre-compute colors for all links in the new file before user scrolls
 				// (priorityPrecompute already handles some files, but this ensures
