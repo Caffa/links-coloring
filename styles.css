@@ -334,3 +334,225 @@
     padding: 6px 10px; /* Larger touch area */
 }
 
+/* ===== Link Collision Statistics Modal ===== */
+
+.link-collision-modal {
+    max-width: 800px;
+}
+
+.collision-stats-bar {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 16px;
+    padding: 10px 15px;
+    background: var(--background-secondary);
+    border-radius: 8px;
+    font-size: 0.9em;
+    color: var(--text-muted);
+}
+
+.collision-stats-bar span {
+    white-space: nowrap;
+}
+
+.collision-mode-toggle {
+    margin-bottom: 12px;
+}
+
+.collision-content-container {
+    margin-top: 12px;
+}
+
+/* Bar Chart Styles */
+.collision-chart-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    background: var(--background-primary-alt);
+    border-radius: 8px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.collision-chart-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.collision-color-swatch {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    border-radius: 4px;
+    border: 2px solid var(--background-modifier-border);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.collision-bar-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.collision-bar-fill {
+    height: 24px;
+    border-radius: 4px;
+    min-width: 4px;
+}
+
+.collision-count-display {
+    font-size: 0.9em;
+    font-weight: 500;
+    color: var(--text-normal);
+    min-width: 80px;
+}
+
+.collision-variants {
+    font-size: 0.75em;
+    color: var(--text-accent);
+    background: var(--background-secondary);
+    padding: 1px 6px;
+    border-radius: 3px;
+    min-width: fit-content;
+}
+
+.collision-percentage {
+    font-size: 0.8em;
+    color: var(--text-muted);
+    min-width: 60px;
+}
+
+.collision-empty {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-muted);
+}
+
+/* Table View Styles */
+.collision-table-container {
+    background: var(--background-primary-alt);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.collision-table-columns {
+    display: flex;
+    gap: 0;
+    max-height: 400px;
+    overflow-x: auto;
+    overflow-y: auto;
+}
+
+.collision-table-column {
+    min-width: 180px;
+    max-width: 220px;
+    border-right: 1px solid var(--background-modifier-border);
+    display: flex;
+    flex-direction: column;
+}
+
+.collision-table-column:last-child {
+    border-right: none;
+}
+
+.collision-column-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    background: var(--background-secondary);
+    border-bottom: 1px solid var(--background-modifier-border);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.collision-color-swatch-small {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.collision-column-count {
+    font-size: 0.85em;
+    font-weight: 500;
+    color: var(--text-muted);
+}
+
+.collision-column-variants {
+    font-size: 0.7em;
+    color: var(--text-accent);
+    background: var(--background-primary);
+    padding: 1px 4px;
+    border-radius: 2px;
+}
+
+.collision-column-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px;
+    overflow-y: auto;
+}
+
+.collision-link-item {
+    font-size: 0.85em;
+    padding: 4px 8px;
+    border-radius: 4px;
+    background: var(--background-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: default;
+}
+
+.collision-link-item:hover {
+    background: var(--background-secondary);
+}
+
+.collision-scroll-hint {
+    text-align: center;
+    padding: 8px;
+    font-size: 0.8em;
+    color: var(--text-muted);
+    font-style: italic;
+    background: var(--background-primary-alt);
+}
+
+/* Mobile adjustments for collision modal */
+.is-mobile .collision-modal {
+    max-width: 95vw;
+}
+
+.is-mobile .collision-chart-row {
+    flex-wrap: wrap;
+}
+
+.is-mobile .collision-color-swatch {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+}
+
+.is-mobile .collision-bar-fill {
+    height: 20px;
+}
+
+.is-mobile .collision-table-columns {
+    max-height: 50vh;
+}
+
+.is-mobile .collision-table-column {
+    min-width: 140px;
+    max-width: 180px;
+}
+
+.is-mobile .collision-link-item {
+    font-size: 0.9em;
+}
+
