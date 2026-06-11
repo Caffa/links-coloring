@@ -1,6 +1,6 @@
 import { type App, PluginSettingTab, Setting } from "obsidian";
 import type LinkColorPlugin from "./main";
-import { type LogCategory, ALL_CATEGORIES } from "./logger";
+import { CollisionModal } from "./ui/collision-modal";
 
 // --- 1. DEFINED PALETTES ---
 // The palette should have distinctly different colors (that are different in hue instead of saturation or lightness). They should alternate between Warm and Cool colors, neighbors in your array should be >90° apart on the color wheel.
@@ -405,17 +405,9 @@ export const PALETTES: Record<string, { dark: string[]; light: string[] }> = {
 export type PaletteType = keyof typeof PALETTES;
 // Updated to include all hash modes
 export type HashMode =
-	| "smart"
 	| "random"
 	| "strict-full"
 	| "strict-acronym"
-	| "strict-first-last"
-	| "strict-first-two-last-two"
-	| "vowel-consonant"
-	| "position-weighted"
-	| "word-boundary-ngrams"
-	| "length-middle"
-	| "similarity"
 	| "phonetic-ipa";
 
 export interface LinkColorSettings {
@@ -425,6 +417,9 @@ export interface LinkColorSettings {
 	customSeed: number; // New setting for the hash seed
 	rerollOnFileChange: boolean; // Automatically re-roll colors when switching files
 	priorityFilePrefix: string; // Process files matching this prefix first on re-roll
+	// Auto-reroll when too many links share same color
+	autoRerollThreshold: number; // Percentage threshold (0-100) - when % of links share colors, auto-reroll
+	// --- Color variant settings ---
 	darkSaturationMin: number;
 	darkSaturationMax: number;
 	darkLightnessMin: number;
@@ -433,134 +428,56 @@ export interface LinkColorSettings {
 	lightSaturationMax: number;
 	lightLightnessMin: number;
 	lightLightnessMax: number;
-	// --- Logging settings ---
-	loggingEnabled: boolean;
-	logLevel: "debug" | "info" | "warn" | "error";
-	logMaxEntries: number;
-	logCategories: LogCategory[];
 }
 
 export const DEFAULT_SETTINGS: LinkColorSettings = {
 	palette: "vibrant",
 	ignorePrefix: true,
-	hashMode: "smart",
+	hashMode: "strict-full",
 	customSeed: 5381, // Default DJB2 seed
-	rerollOnFileChange: false, // Automatically re-roll colors when switching files
-	priorityFilePrefix: "Chapter - ", // Process files matching this prefix first on re-roll
-	darkSaturationMin: 30,
-	darkSaturationMax: 65,
-	darkLightnessMin: 50,
+	rerollOnFileChange: false,
+	priorityFilePrefix: "",
+	autoRerollThreshold: 30, // Auto-reroll when 30%+ links share colors
+	// Color variant settings
+	darkSaturationMin: 70,
+	darkSaturationMax: 90,
+	darkLightnessMin: 60,
 	darkLightnessMax: 75,
-	lightSaturationMin: 50,
-	lightSaturationMax: 95,
-	lightLightnessMin: 20,
-	lightLightnessMax: 50,
-	// --- Logging defaults ---
-	loggingEnabled: false,
-	logLevel: "info",
-	logMaxEntries: 500,
-	logCategories: [...ALL_CATEGORIES],
+	lightSaturationMin: 70,
+	lightSaturationMax: 90,
+	lightLightnessMin: 35,
+	lightLightnessMax: 45,
 };
 
 export const HASH_MODE_DESCRIPTIONS: Record<
 	HashMode,
-	{ name: string; description: string; category: "basic" | "advanced" }
+	{ name: string; description: string }
 > = {
-	smart: {
-		name: "Smart/Diverse",
-		description:
-			"Automatically selects the best hash mode for your folder context to maximize color diversity across all links in current session.",
-		category: "basic",
-	},
 	random: {
 		name: "Random",
 		description:
-			"Assigns colors randomly without hashing. Re-roll button gives you new random colors.",
-		category: "basic",
+			"Assigns colors randomly. Re-roll button gives you new random colors.",
 	},
 	"strict-full": {
 		name: "Character-based (Full)",
 		description:
 			"Uses all characters, acronym, and length for maximum uniqueness. Different words get different colors.",
-		category: "basic",
 	},
 	"strict-acronym": {
 		name: "First Letters Only",
 		description:
 			'Uses only first letters of words. Similar structure words may share colors (e.g., "Design System" ≈ "Data Science").',
-		category: "basic",
-	},
-	"strict-first-last": {
-		name: "First & Last Letters",
-		description:
-			"Uses the first and last letters of every word. Balanced between uniqueness and grouping similar words.",
-		category: "basic",
-	},
-	"strict-first-two-last-two": {
-		name: "First Two & Last Two",
-		description:
-			"Uses first 2 and last 2 characters of each word. Better discrimination than first-last alone.",
-		category: "advanced",
-	},
-	"vowel-consonant": {
-		name: "Vowel Pattern",
-		description:
-			"Groups words by their vowel/consonant patterns. Creates unique patterns based on letter types.",
-		category: "advanced",
-	},
-	"position-weighted": {
-		name: "Position-Weighted",
-		description:
-			"Emphasizes first/last letters more than middle characters. Better discrimination for similar words with different middles.",
-		category: "advanced",
-	},
-	"word-boundary-ngrams": {
-		name: "Word Structure",
-		description:
-			"Uses 3-character chunks (trigrams) within each word. Maintains word identity while providing good discrimination.",
-		category: "advanced",
-	},
-	"length-middle": {
-		name: "Length & Middle",
-		description:
-			"Combines word length with key character positions. Excellent discrimination while being compact.",
-		category: "advanced",
-	},
-	similarity: {
-		name: "Similarity-Based",
-		description:
-			'Related words get similar colors using Levenshtein distance. Great for related terms like "cat" and "cats".',
-		category: "advanced",
 	},
 	"phonetic-ipa": {
 		name: "Sound-Based",
 		description:
-			'Similar-sounding words get similar colors (e.g., "see"/"sea", "cat"/"kat"). Conlang-friendly.',
-		category: "advanced",
+			'Similar-sounding words get similar colors (e.g., "see"/"sea", "cat"/"kat"). Great for conlangs.',
 	},
 };
-
-export const BASIC_HASH_MODES: HashMode[] = [
-	"smart",
-	"random",
-	"strict-full",
-	"strict-acronym",
-	"strict-first-last",
-];
-export const ADVANCED_HASH_MODES: HashMode[] = [
-	"strict-first-two-last-two",
-	"vowel-consonant",
-	"position-weighted",
-	"word-boundary-ngrams",
-	"length-middle",
-	"similarity",
-	"phonetic-ipa",
-];
 
 export class LinkColorSettingTab extends PluginSettingTab {
 	plugin: LinkColorPlugin;
 	previewEl: HTMLElement;
-	showAdvanced: boolean = false;
 
 	constructor(app: App, plugin: LinkColorPlugin) {
 		super(app, plugin);
@@ -603,14 +520,14 @@ export class LinkColorSettingTab extends PluginSettingTab {
 		// --- GROUP 2: MATCHING LOGIC ---
 		new Setting(containerEl).setName("Matching logic").setHeading();
 
-		// Placehold for the description element
 		let descEl: HTMLElement;
 
 		new Setting(containerEl)
 			.setName("Hash mode")
 			.setDesc("Choose how words are converted into colors.")
 			.addDropdown((dropdown) => {
-				BASIC_HASH_MODES.forEach((mode) => {
+				// All modes are now in one simple list
+				(Object.keys(HASH_MODE_DESCRIPTIONS) as HashMode[]).forEach((mode) => {
 					dropdown.addOption(mode, HASH_MODE_DESCRIPTIONS[mode].name);
 				});
 				dropdown
@@ -626,7 +543,6 @@ export class LinkColorSettingTab extends PluginSettingTab {
 					});
 			});
 
-		// The Description Text
 		descEl = containerEl.createDiv({
 			text: HASH_MODE_DESCRIPTIONS[this.plugin.settings.hashMode].description,
 			cls: "link-color-mode-description",
@@ -669,19 +585,11 @@ export class LinkColorSettingTab extends PluginSettingTab {
 					.setButtonText("Re-roll colors")
 					.setTooltip("Pick a random seed to shuffle colors")
 					.onClick(async () => {
-						// Generate random seed between 1 and 100000
 						const newSeed = Math.floor(Math.random() * 100000) + 1;
 						this.plugin.settings.customSeed = newSeed;
-
-						// Clear the color cache so new colors are generated
 						this.plugin.resetColorState();
-
-						// Force refresh of the setting UI
 						this.display();
-
 						await this.plugin.saveSettings();
-
-						// Force all open views to update their colors immediately
 						await this.plugin.forceViewUpdate();
 					}),
 			)
@@ -693,15 +601,30 @@ export class LinkColorSettingTab extends PluginSettingTab {
 					.onClick(async () => {
 						this.plugin.resetColorState();
 						this.display();
-						// Force all open views to update their colors immediately
 						await this.plugin.forceViewUpdate();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Auto re-roll threshold")
+			.setDesc(
+				`When ${this.plugin.settings.autoRerollThreshold}%+ of links share the same color, automatically re-roll to get better distribution. Set to 0 to disable.`,
+			)
+			.addSlider((slider) =>
+				slider
+					.setLimits(0, 100, 5)
+					.setValue(this.plugin.settings.autoRerollThreshold)
+					.setDynamicTooltip()
+					.onChange(async (value) => {
+						this.plugin.settings.autoRerollThreshold = value;
+						await this.plugin.saveSettings();
 					}),
 			);
 
 		new Setting(containerEl)
 			.setName("Re-roll on folder change")
 			.setDesc(
-				"Automatically generate new colors when switching to a different folder. Files within the same folder maintain consistent link colors for smoother scrolling.",
+				"Automatically generate new colors when switching to a different folder. Files within the same folder maintain consistent link colors.",
 			)
 			.addToggle((toggle) =>
 				toggle
@@ -715,7 +638,7 @@ export class LinkColorSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Priority file prefix")
 			.setDesc(
-				"When re-rolling colors, files whose names start with this prefix are processed first. This gives them the best color distribution before other files claim colors. Leave empty to disable.",
+				"When re-rolling colors, files whose names start with this prefix are processed first for better color distribution. Leave empty to disable.",
 			)
 			.addText((text) =>
 				text
@@ -727,306 +650,23 @@ export class LinkColorSettingTab extends PluginSettingTab {
 					}),
 			);
 
-		// --- GROUP 4: ADVANCED SETTINGS ---
-		const advancedHeader = containerEl.createDiv({
-			cls: "link-color-advanced-header",
-		});
-		advancedHeader.textContent = `${this.showAdvanced ? "▼" : "▶"} Advanced Settings`;
-		advancedHeader.addEventListener("click", () => {
-			this.showAdvanced = !this.showAdvanced;
-			this.display();
-		});
-
-		if (this.showAdvanced) {
-			const advancedDesc = containerEl.createDiv({
-				cls: "link-color-mode-description",
-			});
-			advancedDesc.textContent =
-				"Advanced hash modes and color adjustment options";
-
-			let advancedHashDescEl: HTMLElement;
-
-			new Setting(containerEl)
-				.setName("Advanced hash mode")
-				.setDesc(
-					"Choose an advanced hash algorithm for more control over color generation.",
-				)
-				.addDropdown((dropdown) => {
-					[...BASIC_HASH_MODES, ...ADVANCED_HASH_MODES].forEach((mode) => {
-						dropdown.addOption(mode, HASH_MODE_DESCRIPTIONS[mode].name);
-					});
-					dropdown
-						.setValue(this.plugin.settings.hashMode)
-						.onChange(async (value) => {
-							this.plugin.settings.hashMode = value as HashMode;
-							if (advancedHashDescEl)
-								advancedHashDescEl.textContent =
-									HASH_MODE_DESCRIPTIONS[
-										this.plugin.settings.hashMode
-									].description;
-							await this.plugin.saveSettings();
-						});
-				});
-
-			advancedHashDescEl = containerEl.createDiv({
-				text: HASH_MODE_DESCRIPTIONS[this.plugin.settings.hashMode].description,
-				cls: "link-color-mode-description",
-			});
-
-			new Setting(containerEl).setName("Color adjustment").setHeading();
-
-			// Dark mode saturation
-			new Setting(containerEl)
-				.setName("Dark mode saturation")
-				.setDesc(
-					"Saturation range for dark mode (lower = less vibrant, higher = more vibrant)",
-				)
-				.addSlider((slider) =>
-					slider
-						.setLimits(0, 100, 1)
-						.setValue(this.plugin.settings.darkSaturationMin)
-						.setDynamicTooltip()
-						.onChange(async (value) => {
-							this.plugin.settings.darkSaturationMin = value;
-							await this.plugin.saveSettings();
-						}),
-				)
-				.addSlider((slider) =>
-					slider
-						.setLimits(0, 100, 1)
-						.setValue(this.plugin.settings.darkSaturationMax)
-						.setDynamicTooltip()
-						.onChange(async (value) => {
-							if (value >= this.plugin.settings.darkSaturationMin) {
-								this.plugin.settings.darkSaturationMax = value;
-								await this.plugin.saveSettings();
-							}
-						}),
-				);
-
-			// Dark mode lightness
-			new Setting(containerEl)
-				.setName("Dark mode lightness")
-				.setDesc(
-					"Lightness range for dark mode (lower = darker, higher = brighter)",
-				)
-				.addSlider((slider) =>
-					slider
-						.setLimits(0, 100, 1)
-						.setValue(this.plugin.settings.darkLightnessMin)
-						.setDynamicTooltip()
-						.onChange(async (value) => {
-							this.plugin.settings.darkLightnessMin = value;
-							await this.plugin.saveSettings();
-						}),
-				)
-				.addSlider((slider) =>
-					slider
-						.setLimits(0, 100, 1)
-						.setValue(this.plugin.settings.darkLightnessMax)
-						.setDynamicTooltip()
-						.onChange(async (value) => {
-							if (value >= this.plugin.settings.darkLightnessMin) {
-								this.plugin.settings.darkLightnessMax = value;
-								await this.plugin.saveSettings();
-							}
-						}),
-				);
-
-			// Light mode saturation
-			new Setting(containerEl)
-				.setName("Light mode saturation")
-				.setDesc("Saturation range for light mode")
-				.addSlider((slider) =>
-					slider
-						.setLimits(0, 100, 1)
-						.setValue(this.plugin.settings.lightSaturationMin)
-						.setDynamicTooltip()
-						.onChange(async (value) => {
-							this.plugin.settings.lightSaturationMin = value;
-							await this.plugin.saveSettings();
-						}),
-				)
-				.addSlider((slider) =>
-					slider
-						.setLimits(0, 100, 1)
-						.setValue(this.plugin.settings.lightSaturationMax)
-						.setDynamicTooltip()
-						.onChange(async (value) => {
-							if (value >= this.plugin.settings.lightSaturationMin) {
-								this.plugin.settings.lightSaturationMax = value;
-								await this.plugin.saveSettings();
-							}
-						}),
-				);
-
-			// Light mode lightness
-			new Setting(containerEl)
-				.setName("Light mode lightness")
-				.setDesc("Lightness range for light mode")
-				.addSlider((slider) =>
-					slider
-						.setLimits(0, 100, 1)
-						.setValue(this.plugin.settings.lightLightnessMin)
-						.setDynamicTooltip()
-						.onChange(async (value) => {
-							this.plugin.settings.lightLightnessMin = value;
-							await this.plugin.saveSettings();
-						}),
-				)
-				.addSlider((slider) =>
-					slider
-						.setLimits(0, 100, 1)
-						.setValue(this.plugin.settings.lightLightnessMax)
-						.setDynamicTooltip()
-						.onChange(async (value) => {
-							if (value >= this.plugin.settings.lightLightnessMin) {
-								this.plugin.settings.lightLightnessMax = value;
-								await this.plugin.saveSettings();
-							}
-						}),
-				);
-		}
-
-		// --- GROUP 5: DEBUG LOGGING ---
-		new Setting(containerEl).setName("Debug logging").setHeading();
+		// --- GROUP 4: STATISTICS ---
+		new Setting(containerEl).setName("Statistics").setHeading();
 
 		new Setting(containerEl)
-			.setName("Enable logging")
+			.setName("Link collision statistics")
 			.setDesc(
-				"Enable structured logging for debugging. Logs are kept in memory and can be exported for review. Essential for debugging on mobile where DevTools are unavailable.",
+				"View statistics about how many links share each color. Useful for detecting color collisions.",
 			)
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.loggingEnabled)
-					.onChange(async (value) => {
-						this.plugin.settings.loggingEnabled = value;
-						await this.plugin.saveSettings();
-						this.plugin.applyLoggingSettings();
+			.addButton((btn) =>
+				btn
+					.setButtonText("View statistics")
+					.setTooltip("Open the link collision statistics modal")
+					.onClick(() => {
+						new CollisionModal(this.app, this.plugin).open();
 					}),
 			);
-
-		if (this.plugin.settings.loggingEnabled) {
-			new Setting(containerEl)
-				.setName("Log level")
-				.setDesc("Minimum log level to record. Debug records everything; Error only records errors.")
-				.addDropdown((dropdown) => {
-					dropdown
-						.addOption("debug", "Debug (everything)")
-						.addOption("info", "Info")
-						.addOption("warn", "Warn")
-						.addOption("error", "Error only")
-						.setValue(this.plugin.settings.logLevel)
-						.onChange(async (value) => {
-							this.plugin.settings.logLevel = value as LinkColorSettings["logLevel"];
-							await this.plugin.saveSettings();
-							this.plugin.applyLoggingSettings();
-						});
-				});
-
-			new Setting(containerEl)
-				.setName("Max log entries")
-				.setDesc("Maximum number of log entries to keep in memory. Older entries are evicted.")
-				.addSlider((slider) =>
-					slider
-						.setLimits(100, 2000, 100)
-						.setValue(this.plugin.settings.logMaxEntries)
-						.setDynamicTooltip()
-						.onChange(async (value) => {
-							this.plugin.settings.logMaxEntries = value;
-							await this.plugin.saveSettings();
-							this.plugin.applyLoggingSettings();
-						}),
-				);
-
-			new Setting(containerEl)
-				.setName("Log categories")
-				.setDesc("Select which categories to log. Uncheck to reduce noise.")
-				.addDropdown((dropdown) => {
-					// For simplicity, we toggle all categories at once
-					// A multi-select would be better but Obsidian doesn't have one built-in
-					dropdown
-						.addOption("all", "All categories")
-						.addOption("lifecycle+error", "Lifecycle + Error only")
-						.addOption("performance+error", "Performance + Error only")
-						.addOption("error", "Error only")
-						.setValue(
-							this.plugin.settings.logCategories.length === ALL_CATEGORIES.length
-								? "all"
-								: this.plugin.settings.logCategories.includes("performance")
-									? "performance+error"
-									: this.plugin.settings.logCategories.includes("lifecycle")
-										? "lifecycle+error"
-										: "error",
-						)
-						.onChange(async (value) => {
-							switch (value) {
-								case "all":
-									this.plugin.settings.logCategories = [...ALL_CATEGORIES];
-									break;
-								case "lifecycle+error":
-									this.plugin.settings.logCategories = ["lifecycle", "error"];
-									break;
-								case "performance+error":
-									this.plugin.settings.logCategories = ["performance", "error"];
-									break;
-								case "error":
-									this.plugin.settings.logCategories = ["error"];
-									break;
-							}
-							await this.plugin.saveSettings();
-							this.plugin.applyLoggingSettings();
-						});
-				});
-
-			// Stats summary
-			const stats = this.plugin.getLoggerStats();
-			if (stats.totalEntries > 0) {
-				const statsEl = containerEl.createDiv({
-					cls: "link-color-mode-description",
-				});
-				const cacheInfo =
-					stats.cacheHitRate !== null ? ` | Cache hit rate: ${stats.cacheHitRate}%` : "";
-				statsEl.textContent = `${stats.totalEntries} log entries${cacheInfo}`;
-			}
-
-			new Setting(containerEl)
-				.setName("View logs")
-				.setDesc("Open a modal to browse, search, and filter log entries.")
-				.addButton((btn) =>
-					btn.setButtonText("Open log viewer").onClick(() => {
-						this.plugin.openLogViewer();
-					}),
-				);
-
-			new Setting(containerEl)
-				.setName("Export logs")
-				.setDesc("Save logs as a JSON file in your vault for AI agent review.")
-				.addButton((btn) =>
-					btn.setButtonText("Export to file").onClick(async () => {
-						await this.plugin.exportLogsToFile();
-					}),
-				)
-				.addButton((btn) =>
-					btn.setButtonText("Copy to clipboard").onClick(async () => {
-						await this.plugin.copyLogsToClipboard();
-					}),
-				);
-
-			new Setting(containerEl)
-				.setName("Clear logs")
-				.setDesc("Clear all in-memory log entries.")
-				.addButton((btn) =>
-					btn
-						.setButtonText("Clear logs")
-						.setWarning()
-						.onClick(() => {
-							this.plugin.clearLogs();
-							this.display(); // Refresh to hide stats
-						}),
-				);
-		}
-		}
+	}
 
 	updatePreview() {
 		this.previewEl.empty();

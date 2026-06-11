@@ -81,3 +81,478 @@
     display: none;
 }
 
+/* ===== Log Viewer Modal ===== */
+
+.link-color-log-viewer h2 {
+    margin-bottom: 8px;
+}
+
+.log-stats-bar {
+    font-size: 0.85em;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    background: var(--background-secondary);
+    border-radius: 6px;
+}
+
+.log-filter-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.log-search-input {
+    flex: 1;
+    min-width: 150px;
+    padding: 6px 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-size: 0.9em;
+}
+
+.log-filter-select {
+    padding: 6px 8px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-size: 0.85em;
+}
+
+.log-entries-container {
+    max-height: 50vh;
+    overflow-y: auto;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    background: var(--background-primary-alt);
+    font-family: var(--font-monospace);
+    font-size: 0.82em;
+    line-height: 1.5;
+}
+
+.log-entry {
+    padding: 4px 10px;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.log-entry:last-child {
+    border-bottom: none;
+}
+
+.log-entry-header {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.log-time {
+    color: var(--text-muted);
+    font-size: 0.9em;
+    flex-shrink: 0;
+}
+
+.log-level-badge-error {
+    color: #ef4444;
+    font-weight: bold;
+}
+
+.log-level-badge-warn {
+    color: #f59e0b;
+    font-weight: bold;
+}
+
+.log-level-badge-info {
+    color: #3b82f6;
+}
+
+.log-level-badge-debug {
+    color: var(--text-faint);
+}
+
+.log-category {
+    color: var(--text-muted);
+    font-size: 0.85em;
+    background: var(--background-secondary);
+    padding: 1px 5px;
+    border-radius: 3px;
+}
+
+.log-entry-msg {
+    margin-top: 2px;
+    word-break: break-word;
+}
+
+.log-duration {
+    margin-left: 8px;
+    font-size: 0.9em;
+    color: var(--text-muted);
+}
+
+.log-duration-slow {
+    color: #ef4444;
+    font-weight: bold;
+}
+
+.log-entry-data {
+    margin-top: 4px;
+    padding: 6px 10px;
+    background: var(--background-secondary);
+    border-radius: 4px;
+    white-space: pre-wrap;
+    font-size: 0.85em;
+    color: var(--text-muted);
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.log-truncation-notice {
+    text-align: center;
+    padding: 8px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.log-empty {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-muted);
+}
+
+.log-actions-row {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+}
+
+/* ===== Link Color Override Rules ===== */
+/* These rules ensure that decorated links retain their assigned colors
+ * even when themes or Obsidian's built-in CSS try to override them.
+ *
+ * The ViewPlugin decorations add .consistent-link-target and
+ * .consistent-link-alias classes to <span> elements in the editor,
+ * along with inline style attributes like:
+ *   style="color: #FF5252 !important; -webkit-text-fill-color: #FF5252 !important"
+ *
+ * These stylesheet rules provide additional specificity to help inline
+ * styles win against theme overrides, especially on mobile WebKit where
+ * -webkit-text-fill-color cascading behavior differs from desktop.
+ *
+ * CRITICAL: We do NOT set color/ -webkit-text-fill-color here because that
+ * would conflict with the inline styles set by the JS code. Instead, these
+ * rules force other properties that could interfere with color rendering.
+ */
+
+/* In the editor (Source + Live Preview), ensure our decorated spans
+ * override the default Obsidian internal-link color. */
+.cm-line .consistent-link-target,
+.cm-line .consistent-link-alias,
+.cm-hmd-internal-link .consistent-link-target,
+.cm-hmd-internal-link .consistent-link-alias {
+    /* Inline styles from JS set color/ -webkit-text-fill-color with !important.
+     * These rules ensure no other CSS property interferes. */
+    background-color: transparent !important;
+}
+
+/* In reading view, ensure our inline styles on <a> tags win.
+ * Some themes set color via --link-color CSS variable which cascades. */
+.markdown-preview-view a.internal-link[style],
+.markdown-preview-view a[data-href][style],
+.markdown-preview-view a.is-unresolved[style] {
+    /* The [style] selector increases specificity for links that have
+     * been colored by our plugin, ensuring theme CSS variables don't
+     * override our inline color declarations. Nothing extra needed here
+     * since inline !important already wins. */
+}
+
+/* ===== Mobile-Specific Styles ===== */
+/* Mobile WebKit requires smooth transitions when applying link colors
+ * to prevent visible flickering during scroll and rapid navigation. */
+.is-mobile a.internal-link,
+.is-mobile a[data-href],
+.is-mobile a.is-unresolved {
+    transition: color 0.15s ease, -webkit-text-fill-color 0.15s ease;
+}
+
+/* Mobile: ensure editor decorations render with correct colors.
+ * Mobile WebKit sometimes fails to repaint inline styles on
+ * CodeMirror decorations, so we add a rule that forces the browser
+ * to respect the inline color declarations. */
+.is-mobile .cm-line .consistent-link-target,
+.is-mobile .cm-line .consistent-link-alias {
+    /* Force a repaint trigger for mobile WebKit */
+    will-change: color, -webkit-text-fill-color;
+}
+
+/* Mobile settings panel adjustments */
+.is-mobile .link-color-preview-container {
+    gap: 8px;
+    padding: 10px;
+}
+
+.is-mobile .link-color-preview-box {
+    width: 30px;
+    height: 30px;
+}
+
+.is-mobile .link-color-mode-description {
+    font-size: 0.85em;
+    padding-left: 6px;
+    margin-bottom: 12px;
+}
+
+/* Mobile log viewer — larger touch targets and iOS zoom prevention */
+.is-mobile .log-search-input {
+    min-width: 120px;
+    font-size: 16px; /* Prevent iOS zoom on input focus */
+}
+
+.is-mobile .log-filter-select {
+    font-size: 16px; /* Prevent iOS zoom */
+    min-height: 36px; /* Larger touch target */
+}
+
+.is-mobile .log-actions-row {
+    flex-wrap: wrap;
+}
+
+.is-mobile .log-actions-row button {
+    flex: 1;
+    min-height: 40px; /* Touch-friendly buttons */
+}
+
+.is-mobile .log-entries-container {
+    max-height: 40vh; /* Smaller viewport on mobile */
+    font-size: 0.9em;
+}
+
+.is-mobile .log-entry {
+    padding: 6px 10px; /* Larger touch area */
+}
+
+/* ===== Link Collision Statistics Modal ===== */
+
+.link-collision-modal {
+    max-width: 800px;
+}
+
+.collision-stats-bar {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 16px;
+    padding: 10px 15px;
+    background: var(--background-secondary);
+    border-radius: 8px;
+    font-size: 0.9em;
+    color: var(--text-muted);
+}
+
+.collision-stats-bar span {
+    white-space: nowrap;
+}
+
+.collision-mode-toggle {
+    margin-bottom: 12px;
+}
+
+.collision-content-container {
+    margin-top: 12px;
+}
+
+/* Bar Chart Styles */
+.collision-chart-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    background: var(--background-primary-alt);
+    border-radius: 8px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.collision-chart-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.collision-color-swatch {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    border-radius: 4px;
+    border: 2px solid var(--background-modifier-border);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.collision-bar-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.collision-bar-fill {
+    height: 24px;
+    border-radius: 4px;
+    min-width: 4px;
+}
+
+.collision-count-display {
+    font-size: 0.9em;
+    font-weight: 500;
+    color: var(--text-normal);
+    min-width: 80px;
+}
+
+.collision-variants {
+    font-size: 0.75em;
+    color: var(--text-accent);
+    background: var(--background-secondary);
+    padding: 1px 6px;
+    border-radius: 3px;
+    min-width: fit-content;
+}
+
+.collision-percentage {
+    font-size: 0.8em;
+    color: var(--text-muted);
+    min-width: 60px;
+}
+
+.collision-empty {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-muted);
+}
+
+/* Table View Styles */
+.collision-table-container {
+    background: var(--background-primary-alt);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.collision-table-columns {
+    display: flex;
+    gap: 0;
+    max-height: 400px;
+    overflow-x: auto;
+    overflow-y: auto;
+}
+
+.collision-table-column {
+    min-width: 180px;
+    max-width: 220px;
+    border-right: 1px solid var(--background-modifier-border);
+    display: flex;
+    flex-direction: column;
+}
+
+.collision-table-column:last-child {
+    border-right: none;
+}
+
+.collision-column-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    background: var(--background-secondary);
+    border-bottom: 1px solid var(--background-modifier-border);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.collision-color-swatch-small {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.collision-column-count {
+    font-size: 0.85em;
+    font-weight: 500;
+    color: var(--text-muted);
+}
+
+.collision-column-variants {
+    font-size: 0.7em;
+    color: var(--text-accent);
+    background: var(--background-primary);
+    padding: 1px 4px;
+    border-radius: 2px;
+}
+
+.collision-column-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px;
+    overflow-y: auto;
+}
+
+.collision-link-item {
+    font-size: 0.85em;
+    padding: 4px 8px;
+    border-radius: 4px;
+    background: var(--background-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: default;
+}
+
+.collision-link-item:hover {
+    background: var(--background-secondary);
+}
+
+.collision-scroll-hint {
+    text-align: center;
+    padding: 8px;
+    font-size: 0.8em;
+    color: var(--text-muted);
+    font-style: italic;
+    background: var(--background-primary-alt);
+}
+
+/* Mobile adjustments for collision modal */
+.is-mobile .collision-modal {
+    max-width: 95vw;
+}
+
+.is-mobile .collision-chart-row {
+    flex-wrap: wrap;
+}
+
+.is-mobile .collision-color-swatch {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+}
+
+.is-mobile .collision-bar-fill {
+    height: 20px;
+}
+
+.is-mobile .collision-table-columns {
+    max-height: 50vh;
+}
+
+.is-mobile .collision-table-column {
+    min-width: 140px;
+    max-width: 180px;
+}
+
+.is-mobile .collision-link-item {
+    font-size: 0.9em;
+}
+

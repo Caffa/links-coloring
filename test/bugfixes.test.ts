@@ -134,8 +134,8 @@ describe("Bug 4: stripPrefix handles multiple separators", () => {
 		expect(stripPrefix("Chapter.Title")).toBe("Title");
 	});
 
-	it("uses rightmost separator for multiple matches", () => {
-		expect(stripPrefix("A - B - C")).toBe("C");
+	it("keeps multiple parts after first separator", () => {
+		expect(stripPrefix("A - B - C")).toBe("B - C");
 	});
 
 	it("returns null when no separator found", () => {

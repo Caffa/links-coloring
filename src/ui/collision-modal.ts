@@ -10,6 +10,7 @@ import { App, Modal, Setting } from "obsidian";
 import type LinkColorPlugin from "../main";
 import { PALETTES } from "../settings";
 import { getLinkPaletteIndexMap } from "../main";
+import { stripPrefix } from "../color-utils";
 
 export interface ColorStats {
 	color: string;
@@ -279,7 +280,7 @@ export class CollisionModal extends Modal {
 			if (statInfo && statInfo.uniqueVariants > 0) {
 				header.createEl("span", {
 					cls: "collision-column-variants",
-					text: `${statInfo.uniqueVariants} var`,
+					text: statInfo.uniqueVariants === 1 ? "1 shade" : `${statInfo.uniqueVariants} shades`,
 				});
 			}
 
@@ -287,12 +288,13 @@ export class CollisionModal extends Modal {
 			const body = column.createDiv({ cls: "collision-column-body" });
 
 			links.forEach((linkData) => {
+				const displayName = stripPrefix(linkData.linkText) ?? linkData.linkText;
 				const linkEl = body.createDiv({
 					cls: "collision-link-item",
-					text: linkData.linkText,
+					text: displayName,
 				});
 				linkEl.title = linkData.linkText;
-				linkEl.style.color = color;
+				linkEl.style.color = linkData.color;
 			});
 		});
 

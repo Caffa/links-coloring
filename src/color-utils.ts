@@ -27,14 +27,14 @@ export const PREFIX_SEPARATORS = [
 
 /**
  * Strip a prefix from link text using multiple supported separators.
- * Uses lastIndexOf (rightmost match) so "A - B - C" → "C", consistent
- * with the original split-then-take-last behavior.
+ * Uses indexOf (leftmost/first match) so "A - B - C" → "B - C",
+ * keeping all but the first prefix for better context.
  *
  * Returns the stripped text, or null if no separator was found.
  */
 export function stripPrefix(text: string): string | null {
 	for (const sep of PREFIX_SEPARATORS) {
-		const idx = text.lastIndexOf(sep);
+		const idx = text.indexOf(sep);
 		if (idx !== -1) {
 			const namePart = text.substring(idx + sep.length);
 			if (namePart.length > 0) {

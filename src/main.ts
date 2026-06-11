@@ -7,37 +7,28 @@ import {
 	ViewPlugin,
 	type ViewUpdate,
 } from "@codemirror/view";
-import { type App, Plugin, type TFile, type Vault, MarkdownView, Modal, Notice } from "obsidian";
+import { type App, Plugin, type TFile, type Vault, MarkdownView } from "obsidian";
 import { hashPhoneticIpa } from "./phonetic";
 import {
-	type ColorVariantSettings,
 	type ColorUsageMap,
 	COLOR_USAGE_NORMALIZE_THRESHOLD,
 	applyAggressiveVariant,
 	buildCacheKey,
 	djb2Hash,
-	hashLengthMiddle,
-	hashPositionWeighted,
-	hashSimilarity,
 	hashStrictAcronym,
-	hashStrictFirstLast,
-	hashStrictFirstTwoLastTwo,
 	hashStrictFull,
-	hashVowelConsonant,
-	hashWordBoundaryNgrams,
 	normalizeColorUsage,
 	selectPaletteIndexWithLoadBalancing,
 	stripPrefix,
 } from "./color-utils";
 import {
 	DEFAULT_SETTINGS,
-	HASH_MODE_DESCRIPTIONS,
 	type HashMode,
 	type LinkColorSettings,
 	LinkColorSettingTab,
 	PALETTES,
 } from "./settings";
-import { log, type LogCategory, type LogEntry } from "./logger";
+import { CollisionModal } from "./ui/collision-modal";
 
 // --- Reading view DOM coloring ---
 
@@ -61,13 +52,7 @@ function colorLinksInElement(el: HTMLElement, settings: LinkColorSettings): void
 		),
 	);
 
-	log.debug("render", "colorLinksInElement — scanning DOM", {
-		internalLinks: internalLinks.length,
-		isDarkMode,
-		isMobile,
-		elTag: el.tagName,
-		elClass: el.className.slice(0, 80),
-	});
+
 
 	for (const link of internalLinks) {
 		// Get the link target: prefer data-href (Obsidian's internal link target),
@@ -128,10 +113,6 @@ function observeLinksInContainer(
 			}
 		}
 		if (shouldRecolor) {
-			log.debug("mutation", "MutationObserver triggered recolor", {
-				mutationCount: mutations.length,
-				containerTag: container.tagName,
-			});
 			colorLinksInElement(container, plugin.settings);
 		}
 	});
@@ -148,13 +129,10 @@ function observeLinksInContainer(
 
 // Global text-to-color mapping to ensure consistent shading per text
 const textColorMap = new Map<string, string>();
+// Track the palette index for each link (for collision statistics)
+const linkPaletteIndexMap = new Map<string, number>();
 // Track how many times each base color has been used (for shade generation)
 const colorUsageMap: ColorUsageMap = new Map();
-// Track which hash mode is currently active for this session
-let activeHashMode: HashMode = "strict-full";
-let isSmartModeEvaluated = false;
-// Store evaluated hash modes with their scores
-const hashModeScores = new Map<HashMode, number>();
 // Track current parent folder path for folder-based re-roll
 let currentParentFolderPath: string | null = null;
 // Track files that have been opened (to distinguish new file opens from tab switches)
@@ -179,12 +157,10 @@ const MOBILE_RECOLOR_DEBOUNCE_MS = 150;
  * FIX: This was previously synchronous but used vault.cachedRead which returns a Promise.
  * Now properly awaits the async read operation.
  */
-async function extractLinksFromFileAsync(file: TFile, vault: Vault): Promise<string[]> {
+	async function extractLinksFromFileAsync(file: TFile, vault: Vault): Promise<string[]> {
 	try {
-		log.time("performance", `extractLinks-${file.path}`);
 		const content = await vault.cachedRead(file);
 		if (!content) {
-			log.debug("render", "extractLinks — empty content", { path: file.path });
 			return [];
 		}
 
@@ -208,13 +184,8 @@ async function extractLinksFromFileAsync(file: TFile, vault: Vault): Promise<str
 		}
 
 		const deduped = [...new Set(links)]; // Deduplicate
-		log.timeEnd("performance", `extractLinks-${file.path}`, `extractLinks — ${deduped.length} links`);
 		return deduped;
 	} catch (error) {
-		log.error("error", "Failed to extract links from file", {
-			path: file.path,
-			error: String(error),
-		});
 		console.warn("Failed to extract links from file:", file.path, error);
 		return [];
 	}
@@ -369,23 +340,13 @@ async function precomputeFileLinkColors(
 
 	// Skip if already precomputed (prevents redundant work on file switches)
 	if (precomputedFiles.has(filePath)) {
-		log.debug("cache", "precomputeFileLinkColors — skip (already precomputed)", {
-			path: filePath,
-		});
 		return;
 	}
 
 	try {
-		log.time("performance", `precompute-${filePath}`);
 		const content = await plugin.app.vault.cachedRead(file);
 		const links = extractLinksFromContent(content);
 		const isDarkMode = document.body.classList.contains("theme-dark");
-
-		log.info("render", `precomputeFileLinkColors — ${links.length} links`, {
-			path: filePath,
-			links: links.length,
-			isDarkMode,
-		});
 
 		// Pre-compute colors for all links (populates textColorMap cache)
 		for (const link of links) {
@@ -394,12 +355,8 @@ async function precomputeFileLinkColors(
 
 		// Mark as precomputed
 		precomputedFiles.add(filePath);
-		log.timeEnd("performance", `precompute-${filePath}`, `precompute completed`);
 	} catch (error) {
-		log.error("error", "Failed to precompute link colors", {
-			path: filePath,
-			error: String(error),
-		});
+		console.warn("Failed to precompute link colors:", filePath, error);
 	}
 }
 
@@ -435,10 +392,6 @@ async function precomputeFileLinkColorsByFrequency(
 		// Mark as precomputed
 		precomputedFiles.add(filePath);
 	} catch (error) {
-		log.error("error", "Failed to precompute link colors by frequency", {
-			path: filePath,
-			error: String(error),
-		});
 		console.warn("Failed to precompute link colors by frequency:", error);
 	}
 }
@@ -467,13 +420,11 @@ function getRandomColor(
 	// 3. Check Cache (Bug 5: include darkModeRevision in key)
 	const rangeKey = isDarkMode
 		? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
-		: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
+		: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightSaturationMax}-${settings.lightLightnessMin}`;
 	const textKey = buildCacheKey(settings.palette, isDarkMode, darkModeRevision, seed, rangeKey, "random", cleaned);
-	if (textColorMap.has(textKey)) {
-		log.recordCacheHit(true);
+	if (textColorMap.has(textKey) && linkPaletteIndexMap.has(textKey)) {
 		return textColorMap.get(textKey)!;
 	}
-	log.recordCacheHit(false);
 
 	// 4. Generate random hash (different from other modes)
 	const hash = djb2Hash(cleaned, seed);
@@ -503,107 +454,28 @@ function getRandomColor(
 		settings,
 	);
 
+	// Store palette index for collision statistics (use textKey for consistency)
+	linkPaletteIndexMap.set(textKey, bestIndex);
+
 	// 8. Cache Result
 	textColorMap.set(textKey, finalColor);
 
 	return finalColor;
 }
 
-/**
- * Smart mode: Evaluates all hash modes against links from current folder context
- * and selects one with best color distribution for session
- */
-async function evaluateSmartHashMode(
-	plugin: LinkColorPlugin,
-): Promise<HashMode> {
-	if (isSmartModeEvaluated && hashModeScores.size > 0) {
-		log.debug("cache", "Smart mode already evaluated", {
-			activeHashMode,
-		});
-		return activeHashMode; // Already evaluated this session
-	}
 
-	log.info("lifecycle", "Smart mode evaluation starting");
 
-	const isDarkMode = document.body.classList.contains("theme-dark");
-	const paletteObj = PALETTES[plugin.settings.palette] ?? PALETTES["vibrant"]!;
-	const palette = isDarkMode ? paletteObj.dark : paletteObj.light;
-	const availableModes = Object.keys(HASH_MODE_DESCRIPTIONS) as HashMode[];
+// Export for UI components
+export function getTextColorMap(): Map<string, string> {
+	return textColorMap;
+}
 
-	// Collect sample links from folder context
-	const sampleLinks = await collectSampleLinks(plugin.app);
+export function getColorUsageMap(): Map<string, number> {
+	return colorUsageMap;
+}
 
-	if (sampleLinks.length === 0) {
-		// No links found, use default
-		log.warn("lifecycle", "Smart mode — no sample links found, using default");
-		activeHashMode = "strict-full";
-		isSmartModeEvaluated = true;
-		return activeHashMode;
-	}
-
-	console.log(`Smart mode evaluating ${sampleLinks.length} sample links...`);
-
-	// Evaluate each hash mode using an ISOLATED usage map (Bug 2 fix:
-	// prevents evaluation from polluting the global colorUsageMap)
-	const scores = availableModes.map((mode) => {
-		// Count how many colors each hash mode produces
-		const colorCounts = new Map<string, number>();
-		// Bug 2: Use an isolated usage map so evaluation doesn't affect rendering
-		const evalUsageMap: ColorUsageMap = new Map();
-
-		for (const link of sampleLinks) {
-			if (mode === "random") continue; // Skip random mode in evaluation
-			const color = getColorWithHashMode(
-				link,
-				mode,
-				plugin.settings,
-				isDarkMode,
-				false,
-				evalUsageMap, // isolated usage map
-			);
-			colorCounts.set(color, (colorCounts.get(color) || 0) + 1);
-		}
-
-		// Calculate score:
-		// 1. Prefer using more colors from palette (higher unique count = better)
-		// 2. Prefer even distribution (lower max usage = better)
-		const uniqueColors = colorCounts.size;
-		const colorCountsValues = Array.from(colorCounts.values());
-		const maxUsage =
-			colorCountsValues.length > 0 ? Math.max(...colorCountsValues) : 0;
-		const distributionScore = maxUsage / sampleLinks.length; // Lower is better
-
-		// Combined score: prioritize unique colors, then even distribution
-		// Weight: unique colors × 100 - distribution × 10
-		const score = uniqueColors * 100 - distributionScore * 10;
-
-		hashModeScores.set(mode, score);
-
-		return { mode, score, uniqueColors, maxUsage };
-	});
-
-	// Sort by score (descending - higher score is better)
-	scores.sort((a, b) => b.score - a.score);
-
-	// Select best mode
-	if (scores.length > 0) {
-		const bestScore = scores[0];
-		if (bestScore) {
-			activeHashMode = bestScore.mode;
-			isSmartModeEvaluated = true;
-
-			const modeDescription = HASH_MODE_DESCRIPTIONS[activeHashMode];
-			console.log(`Smart mode selected: ${modeDescription?.name || "unknown"}`);
-			console.log(
-				`  Unique colors: ${bestScore.uniqueColors}/${palette.length}`,
-			);
-			console.log(
-				`  Max usage: ${bestScore.maxUsage}/${sampleLinks.length} (${((bestScore.maxUsage / sampleLinks.length) * 100).toFixed(1)}%)`,
-			);
-		}
-	}
-
-	return activeHashMode;
+export function getLinkPaletteIndexMap(): Map<string, number> {
+	return linkPaletteIndexMap;
 }
 
 export default class LinkColorPlugin extends Plugin {
@@ -616,6 +488,22 @@ export default class LinkColorPlugin extends Plugin {
 	// Debounce timer for mobile-optimized recoloring
 	private recolorDebounceTimer: number | null = null;
 
+	/**
+	 * Get the current link-to-color mapping.
+	 * Returns a copy to prevent external modification.
+	 */
+	getLinkColorMap(): Map<string, string> {
+		return new Map(textColorMap);
+	}
+
+	/**
+	 * Get the current color usage statistics.
+	 * Returns a copy to prevent external modification.
+	 */
+	getColorUsageStats(): Map<string, number> {
+		return new Map(colorUsageMap);
+	}
+
 	async onload() {
 		await this.loadSettings();
 		// Initialize seed tracking from settings
@@ -626,59 +514,18 @@ export default class LinkColorPlugin extends Plugin {
 		// --- Mobile detection ---
 		this.isMobile = (this.app as any).isMobile ?? false;
 
-		// --- Logging initialization ---
-		this.applyLoggingSettings();
-
-		// Detect platform info for logging
-		const platform = this.isMobile ? "mobile" : "desktop";
-		const obsidianVersion = (this.app as any).vault.adapter?.app?.version ?? "unknown";
-
-		log.info("lifecycle", "Plugin loading", {
-			version: this.manifest.version,
-			isDesktopOnly: this.manifest.isDesktopOnly,
-			platform,
-			obsidianVersion,
-			settings: {
-				palette: this.settings.palette,
-				hashMode: this.settings.hashMode,
-				seed: this.settings.customSeed,
-				rerollOnFileChange: this.settings.rerollOnFileChange,
-			},
-		});
-
-		// Log mobile/viewport info
-		log.info("mobile", "Platform detection", {
-			platform,
-			viewport: {
-				width: window.innerWidth,
-				height: window.innerHeight,
-				dpr: window.devicePixelRatio,
-			},
-			userAgent: navigator.userAgent.slice(0, 120),
-			isDarkMode: document.body.classList.contains("theme-dark"),
-		});
-
-		log.setSettings({
-			enabled: this.settings.loggingEnabled,
-		});
-		// Update logger metadata
-		log.setMetadata({
-			pluginVersion: this.manifest.version,
-			platform,
-			userAgent: navigator.userAgent,
-			obsidianVersion: String(obsidianVersion),
-			viewport: {
-				width: window.innerWidth,
-				height: window.innerHeight,
-				dpr: window.devicePixelRatio,
-			},
-			settings: this.settings as unknown as Record<string, unknown>,
-			isMobile: this.isMobile,
-		});
-
 		this.addSettingTab(new LinkColorSettingTab(this.app, this));
 		this.editorExtension = createLinkColorExtension(this);
 		this.registerEditorExtension(this.editorExtension);
+
+		// --- Command: Show Link Collision Statistics ---
+		this.addCommand({
+			id: "show-link-collision-stats",
+			name: "Show Link Collision Statistics",
+			callback: () => {
+				new CollisionModal(this.app, this).open();
+			},
+		});
 
 		// --- Reading view link coloring (covers Dataview tables too) ---
 		// Use MarkdownPostProcessor for initial rendering of each section
@@ -720,7 +567,6 @@ export default class LinkColorPlugin extends Plugin {
 		// Re-color reading view links when active leaf changes (new file opened)
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", () => {
-				log.debug("lifecycle", "active-leaf-change — recoloring reading views");
 				// On mobile, use debouncing to avoid excessive recoloring during
 				// rapid navigation (swipe gestures, etc.)
 				const delay = this.isMobile ? MOBILE_RECOLOR_DEBOUNCE_MS : 100;
@@ -736,7 +582,6 @@ export default class LinkColorPlugin extends Plugin {
 
 		this.registerEvent(
 			this.app.workspace.on("css-change", () => {
-				log.info("lifecycle", "css-change — theme switched, recomputing colors");
 				// Bug 5: Increment dark mode revision to invalidate color cache
 				darkModeRevision++;
 				// Clear caches so colors are recalculated with the new theme
@@ -782,11 +627,6 @@ export default class LinkColorPlugin extends Plugin {
 					currentParentFolderPath = newParentPath;
 					// Mark file as opened (after reset, since reset clears openedFiles)
 					openedFiles.add(filePath);
-					log.info("lifecycle", "Folder changed — re-rolling colors", {
-						newParentPath,
-						newSeed,
-						filePath,
-					});
 
 					// Prioritize Chapter-prefixed files first for best color distribution
 					await this.priorityPrecompute();
@@ -801,10 +641,6 @@ export default class LinkColorPlugin extends Plugin {
 				// enables rerollOnFileChange, it will correctly detect folder changes.
 				if (currentParentFolderPath !== newParentPath) {
 					currentParentFolderPath = newParentPath;
-					log.debug("lifecycle", "Updated folder tracking", {
-						currentParentFolderPath,
-						filePath,
-					});
 				}
 
 				// OPTION 2: Pre-process links for smooth scrolling
@@ -812,38 +648,13 @@ export default class LinkColorPlugin extends Plugin {
 				// (priorityPrecompute already handles some files, but this ensures
 				// the active file is always precomputed even if no re-roll occurred)
 				await precomputeFileLinkColors(file, this);
+
+				// OPTION 3: Auto-reroll when too many links share same color
+				if (this.settings.autoRerollThreshold > 0) {
+					await this.checkAndAutoReroll();
+				}
 			}),
 		);
-
-		// Evaluate smart mode on load if selected
-		if (this.settings.hashMode === "smart") {
-			evaluateSmartHashMode(this);
-		}
-
-		// --- Commands ---
-		this.addCommand({
-			id: "open-log-viewer",
-			name: "Open debug log viewer",
-			callback: () => {
-				this.openLogViewer();
-			},
-		});
-
-		this.addCommand({
-			id: "export-logs",
-			name: "Export debug logs to file",
-			callback: () => {
-				this.exportLogsToFile();
-			},
-		});
-
-		this.addCommand({
-			id: "copy-logs",
-			name: "Copy debug logs to clipboard",
-			callback: () => {
-				this.copyLogsToClipboard();
-			},
-		});
 
 		// Pre-compute colors for initially active file
 		const initialFile = this.app.workspace.getActiveFile();
@@ -852,6 +663,54 @@ export default class LinkColorPlugin extends Plugin {
 			openedFiles.add(initialFile.path);
 			await precomputeFileLinkColors(initialFile, this);
 		}
+	}
+
+	/**
+	 * Check if color distribution is poor and auto-reroll if needed.
+	 * Auto-reroll triggers when the same color is assigned to more than
+	 * the threshold percentage of unique links.
+	 */
+	async checkAndAutoReroll(): Promise<boolean> {
+		const threshold = this.settings.autoRerollThreshold;
+		if (threshold <= 0) return false;
+
+		// Count color distribution
+		const colorCounts = new Map<string, number>();
+		let totalLinks = 0;
+
+		for (const [text, color] of textColorMap.entries()) {
+			colorCounts.set(color, (colorCounts.get(color) || 0) + 1);
+			totalLinks++;
+		}
+
+		if (totalLinks === 0) return false;
+
+		// Find the most used color
+		let maxCount = 0;
+		let maxColor = "";
+		for (const [color, count] of colorCounts.entries()) {
+			if (count > maxCount) {
+				maxCount = count;
+				maxColor = color;
+			}
+		}
+
+		// Calculate percentage
+		const percentage = (maxCount / totalLinks) * 100;
+
+		// Auto-reroll if exceeded threshold
+		if (percentage >= threshold && totalLinks >= 5) {
+			console.log(`Link Colorer: Auto-reroll triggered - ${maxColor} used for ${maxCount}/${totalLinks} links (${percentage.toFixed(1)}%, threshold: ${threshold}%)`);
+			
+			const newSeed = Math.floor(Math.random() * 100000) + 1;
+			this.settings.customSeed = newSeed;
+			this.resetColorState();
+			await this.saveSettings();
+			await this.forceViewUpdate();
+			return true;
+		}
+
+		return false;
 	}
 
 	onunload() {
@@ -866,16 +725,13 @@ export default class LinkColorPlugin extends Plugin {
 		// data from persisting across hot-reloads
 		textColorMap.clear();
 		colorUsageMap.clear();
-		hashModeScores.clear();
+		linkPaletteIndexMap.clear();
 		precomputedFiles.clear();
 		openedFiles.clear();
 		currentParentFolderPath = null;
 		lastKnownSeed = -1;
 		lastKnownHashMode = null;
 		darkModeRevision = 0;
-		isSmartModeEvaluated = false;
-		activeHashMode = "strict-full";
-		log.info("lifecycle", "Plugin unloaded");
 	}
 
 	/**
@@ -997,11 +853,6 @@ export default class LinkColorPlugin extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 		this.app.workspace.updateOptions();
-		log.debug("settings", "Settings saved", {
-			palette: this.settings.palette,
-			hashMode: this.settings.hashMode,
-			seed: this.settings.customSeed,
-		});
 		// Re-color reading view links when settings change
 		this.recolorAllReadingViews();
 	}
@@ -1011,22 +862,16 @@ export default class LinkColorPlugin extends Plugin {
 		const previousSize = textColorMap.size;
 		textColorMap.clear();
 		colorUsageMap.clear();
-		hashModeScores.clear();
+		linkPaletteIndexMap.clear();
 		precomputedFiles.clear();
 		// Note: Don't clear openedFiles - we want to remember which files
 		// have been opened even after color reset, to distinguish between
 		// "new files" and "switching between already-open tabs"
-		isSmartModeEvaluated = false;
-		activeHashMode = "strict-full";
 		// Reset seed tracking to force view update on next render
 		// Setting to -1 ensures next view update will detect seed change
 		lastKnownSeed = -1;
 		// Reset hash mode tracking to force cache invalidations
 		lastKnownHashMode = null;
-		log.info("cache", "Color state reset", {
-			previousCacheSize: previousSize,
-			precomputedFilesCleared: true,
-		});
 		console.log("Color state reset");
 	}
 
@@ -1100,84 +945,6 @@ export default class LinkColorPlugin extends Plugin {
 		// Re-setup observers in case dynamic content changed
 		this.setupReadingViewObservers();
 	}
-
-	// --- Logging helpers ---
-
-	/** Sync logger settings from plugin settings */
-	applyLoggingSettings() {
-		log.setSettings({
-			enabled: this.settings.loggingEnabled,
-			maxEntries: this.settings.logMaxEntries,
-			minLevel: this.settings.logLevel,
-			categories: this.settings.logCategories,
-		});
-	}
-
-	/** Get current logger stats for display */
-	getLoggerStats() {
-		return log.getStats();
-	}
-
-	/** Clear all in-memory logs */
-	clearLogs() {
-		log.clear();
-	}
-
-	/** Open the log viewer modal */
-	openLogViewer() {
-		new LogViewerModal(this.app, log.getEntries(), log.getStats()).open();
-	}
-
-	/** Export logs as JSON file to the vault */
-	async exportLogsToFile() {
-		const exportData = log.export();
-		const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-		const filename = `link-colorer-logs-${timestamp}.json`;
-		try {
-			await this.app.vault.create(
-				filename,
-				JSON.stringify(exportData, null, 2),
-			);
-			log.info("lifecycle", `Logs exported to ${filename}`);
-			new Notice(`Logs exported to ${filename}`);
-		} catch (err) {
-			log.error("error", "Failed to export logs", {
-				error: String(err),
-			});
-			new Notice("Failed to export logs");
-		}
-	}
-
-	/** Copy logs as JSON to clipboard */
-	async copyLogsToClipboard() {
-		const exportData = log.export();
-		const json = JSON.stringify(exportData, null, 2);
-		try {
-			// On mobile, navigator.clipboard.writeText may not be available
-			// in all WebView contexts. Fall back to a textarea-based approach.
-			if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
-				await navigator.clipboard.writeText(json);
-				new Notice("Logs copied to clipboard");
-			} else {
-				// Fallback: use a temporary textarea for mobile compatibility
-				const textarea = document.createElement("textarea");
-				textarea.value = json;
-				textarea.style.position = "fixed";
-				textarea.style.left = "-9999px";
-				textarea.style.opacity = "0";
-				document.body.appendChild(textarea);
-				textarea.select();
-				document.execCommand("copy");
-				document.body.removeChild(textarea);
-				new Notice("Logs copied to clipboard");
-			}
-		} catch (err) {
-			log.error("error", "Failed to copy logs to clipboard", {
-				error: String(err),
-			});
-			new Notice("Failed to copy logs — try exporting to file instead");
-		}
-	}
 }
 
 function createLinkColorExtension(plugin: LinkColorPlugin) {
@@ -1199,10 +966,6 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
 				
 				// Clear cache when hash mode changes to ensure colors update immediately
 				if (hashModeChanged) {
-					log.info("cache", "Hash mode changed — clearing color caches", {
-						from: lastKnownHashMode,
-						to: currentHashMode,
-					});
 					textColorMap.clear();
 					colorUsageMap.clear();
 				}
@@ -1220,7 +983,6 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
 			}
 
 			buildDecorations(view: EditorView): DecorationSet {
-				log.time("render", "buildDecorations");
 				const builder = new RangeSetBuilder<Decoration>();
 				const isDarkMode = document.body.classList.contains("theme-dark");
 
@@ -1328,15 +1090,6 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
 					});
 				}
 
-				log.timeEnd("render", "buildDecorations", `buildDecorations — ${linkCount} links decorated`);
-				log.debug("render", "buildDecorations detail", {
-					linkCount,
-					visibleRanges: view.visibleRanges.length,
-					isDarkMode,
-					viewportFrom: view.visibleRanges[0]?.from,
-					viewportTo: view.visibleRanges[0]?.to,
-					cacheSize: textColorMap.size,
-				});
 				return builder.finish();
 			}
 		},
@@ -1346,114 +1099,7 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
 	);
 }
 
-/**
- * Get color using a specific hash mode (used by smart mode evaluation)
- * Bug 2: Accepts an isolated usageMap parameter to prevent evaluation
- * from polluting the global colorUsageMap.
- */
-function getColorWithHashMode(
-	text: string,
-	mode: HashMode,
-	settings: LinkColorSettings,
-	isDarkMode: boolean,
-	useCache: boolean = true,
-	usageMap: ColorUsageMap = colorUsageMap, // Bug 2: defaults to global, but can be isolated
-): string {
-	// 1. Clean Prefix (Bug 4: multi-separator support)
-	if (settings.ignorePrefix) {
-		const stripped = stripPrefix(text);
-		if (stripped !== null) text = stripped;
-	}
 
-	// 2. Prepare Data
-	const cleaned = text.trim().toLowerCase();
-	const seed = settings.customSeed;
-
-	// 3. Check Cache (if enabled) — Bug 5: include darkModeRevision
-	if (useCache) {
-		const rangeKey = isDarkMode
-			? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
-			: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
-		const textKey = buildCacheKey(settings.palette, isDarkMode, darkModeRevision, seed, rangeKey, mode, cleaned);
-		if (textColorMap.has(textKey)) {
-			log.recordCacheHit(true);
-			return textColorMap.get(textKey)!;
-		}
-		log.recordCacheHit(false);
-	}
-
-	// 4. Generate Hash based on specific mode
-	let hash: number;
-	switch (mode) {
-		case "strict-full":
-			hash = hashStrictFull(cleaned, seed);
-			break;
-		case "strict-acronym":
-			hash = hashStrictAcronym(cleaned, seed);
-			break;
-		case "strict-first-last":
-			hash = hashStrictFirstLast(cleaned, seed);
-			break;
-		case "strict-first-two-last-two":
-			hash = hashStrictFirstTwoLastTwo(cleaned, seed);
-			break;
-		case "vowel-consonant":
-			hash = hashVowelConsonant(cleaned, seed);
-			break;
-		case "position-weighted":
-			hash = hashPositionWeighted(cleaned, seed);
-			break;
-		case "word-boundary-ngrams":
-			hash = hashWordBoundaryNgrams(cleaned, seed);
-			break;
-		case "length-middle":
-			hash = hashLengthMiddle(cleaned, seed);
-			break;
-		case "similarity":
-			hash = hashSimilarity(cleaned, seed);
-			break;
-		case "phonetic-ipa":
-			hash = hashPhoneticIpa(cleaned, seed);
-			break;
-		default:
-			hash = hashStrictFull(cleaned, seed);
-	}
-
-	// 5. Select Palette (Bug 1: includes hash mode in key; Bug 3: improved tiebreaker)
-	const paletteObj = PALETTES[settings.palette] ?? PALETTES["vibrant"]!;
-	const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
-	const paletteSize = colorList.length;
-
-	const bestIndex = selectPaletteIndexWithLoadBalancing(
-		usageMap, hash, settings.palette, mode, isDarkMode, seed, paletteSize,
-	);
-
-	const selectedKey = `${settings.palette}-${mode}-${isDarkMode ? "dark" : "light"}-${seed}-${bestIndex}`;
-	const currentUsageCount = usageMap.get(selectedKey) || 0;
-
-	const baseColor = colorList[bestIndex]!;
-
-	// Apply Variant
-	const variantSeed = djb2Hash(cleaned + "|v", seed);
-	const finalColor = applyAggressiveVariant(
-		baseColor,
-		variantSeed,
-		currentUsageCount,
-		isDarkMode,
-		settings,
-	);
-
-	// Cache result
-	if (useCache) {
-		const rangeKey = isDarkMode
-			? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
-			: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
-		const textKey = buildCacheKey(settings.palette, isDarkMode, darkModeRevision, seed, rangeKey, mode, cleaned);
-		textColorMap.set(textKey, finalColor);
-	}
-
-	return finalColor;
-}
 
 function getColor(
 	text: string,
@@ -1463,11 +1109,6 @@ function getColor(
 	// Handle special modes first
 	if (settings.hashMode === "random") {
 		return getRandomColor(text, settings, isDarkMode);
-	}
-
-	if (settings.hashMode === "smart") {
-		// Smart mode uses the pre-selected hash mode from evaluation
-		return getColorWithHashMode(text, activeHashMode, settings, isDarkMode);
 	}
 
 	// Regular hash modes
@@ -1486,11 +1127,9 @@ function getColor(
 		? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
 		: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
 	const textKey = buildCacheKey(settings.palette, isDarkMode, darkModeRevision, seed, rangeKey, settings.hashMode, cleaned);
-	if (textColorMap.has(textKey)) {
-		log.recordCacheHit(true);
+	if (textColorMap.has(textKey) && linkPaletteIndexMap.has(textKey)) {
 		return textColorMap.get(textKey)!;
 	}
-	log.recordCacheHit(false);
 	let hash: number;
 
 	switch (settings.hashMode) {
@@ -1499,27 +1138,6 @@ function getColor(
 			break;
 		case "strict-acronym":
 			hash = hashStrictAcronym(cleaned, seed);
-			break;
-		case "strict-first-last":
-			hash = hashStrictFirstLast(cleaned, seed);
-			break;
-		case "strict-first-two-last-two":
-			hash = hashStrictFirstTwoLastTwo(cleaned, seed);
-			break;
-		case "vowel-consonant":
-			hash = hashVowelConsonant(cleaned, seed);
-			break;
-		case "position-weighted":
-			hash = hashPositionWeighted(cleaned, seed);
-			break;
-		case "word-boundary-ngrams":
-			hash = hashWordBoundaryNgrams(cleaned, seed);
-			break;
-		case "length-middle":
-			hash = hashLengthMiddle(cleaned, seed);
-			break;
-		case "similarity":
-			hash = hashSimilarity(cleaned, seed);
 			break;
 		case "phonetic-ipa":
 			hash = hashPhoneticIpa(cleaned, seed);
@@ -1541,6 +1159,9 @@ function getColor(
 	const currentUsageCount = colorUsageMap.get(selectedKey) || 0;
 
 	const baseColor = colorList[bestIndex]!;
+
+	// Store palette index for collision statistics (use textKey for consistency)
+	linkPaletteIndexMap.set(textKey, bestIndex);
 
 	// 7. Variant Seed
 	const variantSeed = djb2Hash(cleaned + "|v", seed);
@@ -1567,216 +1188,4 @@ function getColor(
  */
 function generateStyleString(color: string, _settings: LinkColorSettings): string {
 	return `color:${color} !important;-webkit-text-fill-color:${color} !important;--link-color:${color} !important;--link-external-color:${color} !important;`;
-}
-
-// --- Log Viewer Modal ---
-
-/**
- * Modal for browsing, searching, and filtering plugin logs.
- * Designed to replace DevTools on mobile — the user can inspect
- * what the plugin is doing from within Obsidian's settings.
- */
-class LogViewerModal extends Modal {
-	private entries: LogEntry[];
-	private stats: ReturnType<typeof log.getStats>;
-	private filterText = "";
-	private filterCategory: LogCategory | "all" = "all";
-	private filterLevel: string = "all";
-
-	constructor(
-		app: App,
-		entries: LogEntry[],
-		stats: ReturnType<typeof log.getStats>,
-	) {
-		super(app);
-		this.entries = entries;
-		this.stats = stats;
-	}
-
-	onOpen() {
-		const { containerEl } = this;
-		containerEl.empty();
-		containerEl.addClass("link-color-log-viewer");
-
-		// Title
-		containerEl.createEl("h2", { text: "Link Colorer Logs" });
-
-		// Stats bar
-		const statsBar = containerEl.createDiv({ cls: "log-stats-bar" });
-		const cacheInfo =
-			this.stats.cacheHitRate !== null
-				? ` | Cache: ${this.stats.cacheHitRate}%`
-				: "";
-		statsBar.textContent = `${this.stats.totalEntries} entries${cacheInfo}`;
-
-		// Filters row
-		const filterRow = containerEl.createDiv({ cls: "log-filter-row" });
-
-		// Search input
-		const searchInput = filterRow.createEl("input", {
-			type: "text",
-			placeholder: "Search logs...",
-			cls: "log-search-input",
-		});
-		searchInput.addEventListener("input", () => {
-			this.filterText = searchInput.value;
-			this.renderLogs();
-		});
-
-		// Category dropdown
-		const catSelect = filterRow.createEl("select", { cls: "log-filter-select" });
-		catSelect.createEl("option", { text: "All categories", value: "all" });
-		const categories: LogCategory[] = [
-			"lifecycle",
-			"render",
-			"cache",
-			"mutation",
-			"settings",
-			"performance",
-			"mobile",
-			"error",
-		];
-		for (const cat of categories) {
-			catSelect.createEl("option", { text: cat, value: cat });
-		}
-		catSelect.addEventListener("change", () => {
-			this.filterCategory = catSelect.value as LogCategory | "all";
-			this.renderLogs();
-		});
-
-		// Level dropdown
-		const levelSelect = filterRow.createEl("select", {
-			cls: "log-filter-select",
-		});
-		levelSelect.createEl("option", { text: "All levels", value: "all" });
-		for (const lvl of ["error", "warn", "info", "debug"] as const) {
-			levelSelect.createEl("option", { text: lvl, value: lvl });
-		}
-		levelSelect.addEventListener("change", () => {
-			this.filterLevel = levelSelect.value;
-			this.renderLogs();
-		});
-
-		// Log container
-		const logContainer = containerEl.createDiv({
-			cls: "log-entries-container",
-		});
-		logContainer.setAttribute("data-log-container", "true");
-
-		this.renderLogs();
-
-		// Action buttons
-		const actionsRow = containerEl.createDiv({ cls: "log-actions-row" });
-		const copyBtn = actionsRow.createEl("button", {
-			text: "Copy all to clipboard",
-			cls: "mod-cta",
-		});
-		copyBtn.addEventListener("click", async () => {
-			try {
-				await navigator.clipboard.writeText(
-					JSON.stringify(log.export(), null, 2),
-				);
-				new Notice("Logs copied to clipboard");
-			} catch {
-				new Notice("Failed to copy logs");
-			}
-		});
-	}
-
-	private renderLogs() {
-		const container = this.containerEl.querySelector(
-			"[data-log-container]",
-		) as HTMLElement | null;
-		if (!container) return;
-		container.empty();
-
-		let filtered = [...this.entries].reverse(); // newest first
-
-		if (this.filterText) {
-			const lower = this.filterText.toLowerCase();
-			filtered = filtered.filter(
-				(e) =>
-					e.msg.toLowerCase().includes(lower) ||
-					(e.data && JSON.stringify(e.data).toLowerCase().includes(lower)),
-			);
-		}
-
-		if (this.filterCategory !== "all") {
-			filtered = filtered.filter((e) => e.cat === this.filterCategory);
-		}
-
-		if (this.filterLevel !== "all") {
-			filtered = filtered.filter((e) => e.level === this.filterLevel);
-		}
-
-		// Limit display to 200 entries for DOM performance
-		const displayed = filtered.slice(0, 200);
-
-		if (filtered.length > 200) {
-			container.createDiv({
-				cls: "log-truncation-notice",
-				text: `Showing 200 of ${filtered.length} filtered entries`,
-			});
-		}
-
-		for (const entry of displayed) {
-			const row = container.createDiv({
-				cls: `log-entry log-level-${entry.level}`,
-			});
-
-			const time = new Date(entry.ts);
-			const timeStr = time.toLocaleTimeString("en-US", {
-				hour12: false,
-				hour: "2-digit",
-				minute: "2-digit",
-				second: "2-digit",
-			});
-
-			const header = row.createDiv({ cls: "log-entry-header" });
-			header.createEl("span", {
-				cls: "log-time",
-				text: timeStr,
-			});
-			header.createEl("span", {
-				cls: `log-level log-level-badge-${entry.level}`,
-				text: entry.level.toUpperCase(),
-			});
-			header.createEl("span", {
-				cls: "log-category",
-				text: entry.cat,
-			});
-
-			const msgEl = row.createDiv({ cls: "log-entry-msg", text: entry.msg });
-
-			if (entry.durMs !== undefined) {
-				const durEl = row.createEl("span", {
-					cls: "log-duration",
-					text: `${entry.durMs}ms`,
-				});
-				if (entry.durMs > 100) {
-					durEl.addClass("log-duration-slow");
-				}
-				msgEl.appendChild(durEl);
-			}
-
-			if (entry.data && Object.keys(entry.data).length > 0) {
-				const dataEl = row.createDiv({ cls: "log-entry-data" });
-				dataEl.textContent = JSON.stringify(entry.data, null, 2);
-				// Make data collapsible
-				dataEl.style.display = "none";
-				msgEl.addEventListener("click", () => {
-					dataEl.style.display =
-						dataEl.style.display === "none" ? "block" : "none";
-				});
-				msgEl.style.cursor = "pointer";
-			}
-		}
-
-		if (displayed.length === 0) {
-			container.createDiv({
-				cls: "log-empty",
-				text: "No log entries match your filters.",
-			});
-		}
-	}
 }
