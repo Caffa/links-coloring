@@ -517,40 +517,35 @@ export class LinkColorSettingTab extends PluginSettingTab {
 		});
 		this.updatePreview();
 
-		// --- GROUP 2: MATCHING LOGIC ---
-		new Setting(containerEl).setName("Matching logic").setHeading();
+		// --- GROUP 2: HOW LINKS GET COLORS ---
+		new Setting(containerEl).setName("How links get colors").setHeading();
 
-		let descEl: HTMLElement;
+		// Hash mode with examples
+		const hashModeSetting = new Setting(containerEl)
+			.setName("Color assignment method")
+			.setDesc("Choose how link text is converted into colors.");
 
-		new Setting(containerEl)
-			.setName("Hash mode")
-			.setDesc("Choose how words are converted into colors.")
-			.addDropdown((dropdown) => {
-				// All modes are now in one simple list
-				(Object.keys(HASH_MODE_DESCRIPTIONS) as HashMode[]).forEach((mode) => {
-					dropdown.addOption(mode, HASH_MODE_DESCRIPTIONS[mode].name);
-				});
-				dropdown
-					.setValue(this.plugin.settings.hashMode)
-					.onChange(async (value) => {
-						this.plugin.settings.hashMode = value as HashMode;
-						if (descEl)
-							descEl.textContent =
-								HASH_MODE_DESCRIPTIONS[
-									this.plugin.settings.hashMode
-								].description;
-						await this.plugin.saveSettings();
-					});
-			});
-
-		descEl = containerEl.createDiv({
-			text: HASH_MODE_DESCRIPTIONS[this.plugin.settings.hashMode].description,
+		const hashModeDesc = containerEl.createDiv({
 			cls: "link-color-mode-description",
+		});
+		this.updateHashModeDescription(hashModeDesc);
+
+		hashModeSetting.addDropdown((dropdown) => {
+			(Object.keys(HASH_MODE_DESCRIPTIONS) as HashMode[]).forEach((mode) => {
+				dropdown.addOption(mode, HASH_MODE_DESCRIPTIONS[mode].name);
+			});
+			dropdown
+				.setValue(this.plugin.settings.hashMode)
+				.onChange(async (value) => {
+					this.plugin.settings.hashMode = value as HashMode;
+					this.updateHashModeDescription(hashModeDesc);
+					await this.plugin.saveSettings();
+				});
 		});
 
 		new Setting(containerEl)
 			.setName("Ignore prefixes")
-			.setDesc('If enabled, "char - pamela" is colored based on "pamela" only.')
+			.setDesc('Treat "char - pamela" the same as "pamela" for coloring. Useful for structured link names.')
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.plugin.settings.ignorePrefix)
@@ -560,30 +555,17 @@ export class LinkColorSettingTab extends PluginSettingTab {
 					}),
 			);
 
-		// --- GROUP 3: RANDOMIZATION ---
-		new Setting(containerEl).setName("Color randomization").setHeading();
+		// --- GROUP 3: COLOR MANAGEMENT ---
+		new Setting(containerEl).setName("Color management").setHeading();
 
+		// Seed as read-only info + shuffle button
 		new Setting(containerEl)
-			.setName("Color seed")
-			.setDesc(
-				'The starting number for color generation. Change this to "shuffle" all link colors.',
-			)
-			.addText((text) =>
-				text
-					.setPlaceholder("5381")
-					.setValue(String(this.plugin.settings.customSeed))
-					.onChange(async (value) => {
-						const parsed = parseInt(value);
-						if (!isNaN(parsed)) {
-							this.plugin.settings.customSeed = parsed;
-							await this.plugin.saveSettings();
-						}
-					}),
-			)
+			.setName("Shuffle colors")
+			.setDesc(`Current seed: ${this.plugin.settings.customSeed}`)
 			.addButton((btn) =>
 				btn
-					.setButtonText("Re-roll colors")
-					.setTooltip("Pick a random seed to shuffle colors")
+					.setButtonText("Shuffle all colors")
+					.setTooltip("Pick a random seed to assign new colors to all links")
 					.onClick(async () => {
 						const newSeed = Math.floor(Math.random() * 100000) + 1;
 						this.plugin.settings.customSeed = newSeed;
@@ -595,8 +577,8 @@ export class LinkColorSettingTab extends PluginSettingTab {
 			)
 			.addButton((btn) =>
 				btn
-					.setButtonText("Reset all colors")
-					.setTooltip("Reset color state and re-generate all colors")
+					.setButtonText("Reset color cache")
+					.setTooltip("Clear all cached colors and regenerate")
 					.setWarning()
 					.onClick(async () => {
 						this.plugin.resetColorState();
@@ -605,10 +587,16 @@ export class LinkColorSettingTab extends PluginSettingTab {
 					}),
 			);
 
+		// Collision status inline
+		const collisionStatusEl = containerEl.createDiv({
+			cls: "link-color-collision-status",
+		});
+		this.updateCollisionStatus(collisionStatusEl);
+
 		new Setting(containerEl)
-			.setName("Auto re-roll threshold")
+			.setName("Auto-reroll threshold")
 			.setDesc(
-				`When ${this.plugin.settings.autoRerollThreshold}%+ of links share the same color, automatically re-roll to get better distribution. Set to 0 to disable.`,
+				`Automatically shuffle colors when too many links share the same color. Set to 0 to disable.`,
 			)
 			.addSlider((slider) =>
 				slider
@@ -618,13 +606,14 @@ export class LinkColorSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.autoRerollThreshold = value;
 						await this.plugin.saveSettings();
+						this.updateCollisionStatus(collisionStatusEl);
 					}),
 			);
 
 		new Setting(containerEl)
-			.setName("Re-roll on folder change")
+			.setName("Folder-based color consistency")
 			.setDesc(
-				"Automatically generate new colors when switching to a different folder. Files within the same folder maintain consistent link colors.",
+				"Keep consistent colors when switching between files in the same folder. Enable for project-based or chapter-based organization.",
 			)
 			.addToggle((toggle) =>
 				toggle
@@ -638,7 +627,7 @@ export class LinkColorSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Priority file prefix")
 			.setDesc(
-				"When re-rolling colors, files whose names start with this prefix are processed first for better color distribution. Leave empty to disable.",
+				"Files starting with this prefix (e.g., 'Chapter - ') get first pick of colors. Useful for index pages that link to many topics.",
 			)
 			.addText((text) =>
 				text
@@ -654,9 +643,9 @@ export class LinkColorSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName("Statistics").setHeading();
 
 		new Setting(containerEl)
-			.setName("Link collision statistics")
+			.setName("Detailed collision statistics")
 			.setDesc(
-				"View statistics about how many links share each color. Useful for detecting color collisions.",
+				"View detailed statistics about which links share colors.",
 			)
 			.addButton((btn) =>
 				btn
@@ -666,6 +655,115 @@ export class LinkColorSettingTab extends PluginSettingTab {
 						new CollisionModal(this.app, this.plugin).open();
 					}),
 			);
+	}
+
+	private updateHashModeDescription(container: HTMLElement): void {
+		const mode = this.plugin.settings.hashMode;
+		const info = HASH_MODE_DESCRIPTIONS[mode];
+
+		container.empty();
+
+		// Main description
+		container.createEl("div", {
+			text: info.description,
+			cls: "link-color-mode-main-desc",
+		});
+
+		// Examples based on mode
+		const examplesContainer = container.createDiv({
+			cls: "link-color-mode-examples",
+		});
+
+		const examples = this.getHashModeExamples(mode);
+		examplesContainer.createEl("div", {
+			text: "How similar links are colored:",
+			cls: "link-color-examples-label",
+		});
+
+		for (const example of examples) {
+			const row = examplesContainer.createDiv({ cls: "link-color-example-row" });
+			row.createEl("span", { text: example.input, cls: "link-color-example-input" });
+			row.createEl("span", { text: "→", cls: "link-color-example-arrow" });
+			row.createEl("span", { text: example.output, cls: "link-color-example-output" });
+		}
+	}
+
+	private getHashModeExamples(mode: HashMode): Array<{ input: string; output: string }> {
+		switch (mode) {
+			case "random":
+				return [
+					{ input: '"Design"', output: "random color, changes each session" },
+					{ input: '"Design"', output: "different color on re-roll" },
+				];
+			case "strict-full":
+				return [
+					{ input: '"Design System"', output: "unique color (all chars)" },
+					{ input: '"Design Patterns"', output: "different color" },
+					{ input: '"Design System"', output: "same color always" },
+				];
+			case "strict-acronym":
+				return [
+					{ input: '"Design System"', output: "color from 'DS'" },
+					{ input: '"Data Science"', output: "same color (also 'DS')" },
+					{ input: '"Design Patterns"', output: "different color ('DP')" },
+				];
+			case "phonetic-ipa":
+				return [
+					{ input: '"see"', output: "color A" },
+					{ input: '"sea"', output: "similar color (sounds same)" },
+					{ input: '"Design"', output: "color B" },
+				];
+			default:
+				return [{ input: '"Link"', output: "unique color" }];
+		}
+	}
+
+	private updateCollisionStatus(container: HTMLElement): void {
+		const colorMap = this.plugin.getLinkColorMap();
+		const totalLinks = colorMap.size;
+
+		if (totalLinks === 0) {
+			container.empty();
+			container.addClass("link-color-status-empty");
+			container.createEl("span", {
+				text: "No links colored yet. Open files with wiki-links to see status.",
+				cls: "link-color-status-empty-text",
+			});
+			return;
+		}
+
+		// Count color distribution
+		const colorCounts = new Map<string, number>();
+		for (const color of colorMap.values()) {
+			colorCounts.set(color, (colorCounts.get(color) || 0) + 1);
+		}
+
+		// Find max collision
+		let maxCount = 0;
+		for (const count of colorCounts.values()) {
+			if (count > maxCount) maxCount = count;
+		}
+
+		const maxPercentage = (maxCount / totalLinks) * 100;
+		const threshold = this.plugin.settings.autoRerollThreshold;
+		const isGood = threshold === 0 || maxPercentage < threshold;
+
+		container.empty();
+		container.removeClass("link-color-status-empty");
+		container.addClass("link-color-status-bar");
+
+		// Status indicator
+		const statusIcon = container.createEl("span", {
+			cls: isGood ? "link-color-status-good" : "link-color-status-warning",
+		});
+		statusIcon.setText(isGood ? "✓" : "⚠");
+
+		// Stats text
+		const statsText = container.createEl("span", { cls: "link-color-status-text" });
+		const uniqueColors = colorCounts.size;
+		statsText.setText(
+			`${totalLinks} links, ${uniqueColors} colors, max ${maxCount} links share one color (${maxPercentage.toFixed(0)}%)`,
+		);
 	}
 
 	updatePreview() {

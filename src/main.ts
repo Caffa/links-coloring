@@ -406,6 +406,7 @@ function getRandomColor(
 	text: string,
 	settings: LinkColorSettings,
 	isDarkMode: boolean,
+	shouldCache: boolean = true,
 ): string {
 	// 1. Clean Prefix (Bug 4: multi-separator support)
 	if (settings.ignorePrefix) {
@@ -420,10 +421,15 @@ function getRandomColor(
 	// 3. Check Cache (Bug 5: include darkModeRevision in key)
 	const rangeKey = isDarkMode
 		? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
-		: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightSaturationMax}-${settings.lightLightnessMin}`;
+		: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
 	const textKey = buildCacheKey(settings.palette, isDarkMode, darkModeRevision, seed, rangeKey, "random", cleaned);
 	if (textColorMap.has(textKey) && linkPaletteIndexMap.has(textKey)) {
 		return textColorMap.get(textKey)!;
+	}
+
+	// Early return if not caching - compute color without storing
+	if (!shouldCache) {
+		return computeRandomColorWithoutCaching(cleaned, settings, isDarkMode, seed);
 	}
 
 	// 4. Generate random hash (different from other modes)
@@ -461,6 +467,29 @@ function getRandomColor(
 	textColorMap.set(textKey, finalColor);
 
 	return finalColor;
+}
+
+/**
+ * Compute a random color for display without caching it.
+ * Used for partial links during typing to avoid polluting the cache.
+ */
+function computeRandomColorWithoutCaching(
+	cleaned: string,
+	settings: LinkColorSettings,
+	isDarkMode: boolean,
+	seed: number,
+): string {
+	const hash = djb2Hash(cleaned, seed);
+	const paletteObj = PALETTES[settings.palette] ?? PALETTES["vibrant"]!;
+	const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
+	const paletteSize = colorList.length;
+
+	// Use hash directly for palette selection (no load balancing for uncached)
+	const paletteIndex = Math.abs(hash) % paletteSize;
+	const baseColor = colorList[paletteIndex]!;
+
+	const variantSeed = djb2Hash(cleaned + "|v", seed);
+	return applyAggressiveVariant(baseColor, variantSeed, 0, isDarkMode, settings);
 }
 
 
@@ -513,9 +542,14 @@ export default class LinkColorPlugin extends Plugin {
 
 		// --- Mobile detection ---
 		this.isMobile = (this.app as any).isMobile ?? false;
+		
+		// Debug logging for mobile diagnostics
+		if (this.isMobile) {
+			console.log("[Link Colorer] Running on mobile platform");
+		}
 
 		this.addSettingTab(new LinkColorSettingTab(this.app, this));
-		this.editorExtension = createLinkColorExtension(this);
+		this.editorExtension = createLinkColorExtension(this, this.isMobile);
 		this.registerEditorExtension(this.editorExtension);
 
 		// --- Command: Show Link Collision Statistics ---
@@ -524,6 +558,19 @@ export default class LinkColorPlugin extends Plugin {
 			name: "Show Link Collision Statistics",
 			callback: () => {
 				new CollisionModal(this.app, this).open();
+			},
+		});
+
+		// --- Command: Reroll Colors ---
+		this.addCommand({
+			id: "reroll-colors",
+			name: "Reroll Colors",
+			callback: async () => {
+				const newSeed = Math.floor(Math.random() * 100000) + 1;
+				this.settings.customSeed = newSeed;
+				this.resetColorState();
+				await this.saveSettings();
+				await this.forceViewUpdate();
 			},
 		});
 
@@ -947,13 +994,17 @@ export default class LinkColorPlugin extends Plugin {
 	}
 }
 
-function createLinkColorExtension(plugin: LinkColorPlugin) {
+function createLinkColorExtension(plugin: LinkColorPlugin, isMobile: boolean) {
 	return ViewPlugin.fromClass(
 		class {
 			decorations: DecorationSet;
 
 			constructor(view: EditorView) {
 				this.decorations = this.buildDecorations(view);
+				// Debug: Log initial decoration creation on mobile
+				if (isMobile) {
+					console.log("[Link Colorer] ViewPlugin constructor - Initial decorations created");
+				}
 			}
 
 			update(update: ViewUpdate) {
@@ -973,8 +1024,20 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
 				// Rebuild decorations on any change that could affect rendering.
 				// On mobile, `focusChanged` is important because the editor may
 				// lose and regain focus during swipe gestures, keyboard toggles, etc.
-				if (update.docChanged || update.viewportChanged || seedChanged || hashModeChanged || update.focusChanged) {
+				const shouldRebuild = update.docChanged || update.viewportChanged || seedChanged || hashModeChanged || update.focusChanged;
+				
+				if (shouldRebuild) {
 					this.decorations = this.buildDecorations(update.view);
+					// Debug: Log decoration rebuild on mobile
+					if (isMobile && update.docChanged) {
+						console.log("[Link Colorer] ViewPlugin update - Rebuilt decorations due to:", {
+							docChanged: update.docChanged,
+							viewportChanged: update.viewportChanged,
+							focusChanged: update.focusChanged,
+							seedChanged,
+							hashModeChanged
+						});
+					}
 				}
 				
 				// Update the tracked values after processing
@@ -992,6 +1055,12 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
 				let targetTextBuffer = "";
 				let targetColor = "";
 				let linkCount = 0;
+
+				// Debug: Check visible ranges on mobile
+				const visibleRanges = view.visibleRanges;
+				if (isMobile && visibleRanges.length === 0) {
+					console.warn("[Link Colorer] No visible ranges detected - this may indicate a timing issue");
+				}
 
 				for (const { from, to } of view.visibleRanges) {
 					syntaxTree(view.state).iterate({
@@ -1039,10 +1108,12 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
 
 								if (text === "|" || type.includes("formatting-link-pipe")) {
 									hasPipe = true;
+									// Don't cache partial link colors - only compute for display
 									targetColor = getColor(
 										targetTextBuffer,
 										plugin.settings,
 										isDarkMode,
+										false, // shouldCache: false - don't cache partial aliases
 									);
 									return;
 								}
@@ -1050,10 +1121,13 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
 								if (!type.includes("formatting")) {
 									if (!hasPipe) {
 										targetTextBuffer += text;
+										// Don't cache partial link colors during typing - only compute for display
+										// This prevents "md", "md -", etc. from being cached while user types
 										const dynColor = getColor(
 											targetTextBuffer,
 											plugin.settings,
 											isDarkMode,
+											false, // shouldCache: false - don't cache incomplete links
 										);
 										linkCount++;
 										builder.add(
@@ -1090,6 +1164,11 @@ function createLinkColorExtension(plugin: LinkColorPlugin) {
 					});
 				}
 
+				// Debug: Log link count on mobile
+				if (isMobile && linkCount > 0) {
+					console.log(`[Link Colorer] Built ${linkCount} link decorations`);
+				}
+
 				return builder.finish();
 			}
 		},
@@ -1105,10 +1184,11 @@ function getColor(
 	text: string,
 	settings: LinkColorSettings,
 	isDarkMode: boolean,
+	shouldCache: boolean = true,
 ): string {
 	// Handle special modes first
 	if (settings.hashMode === "random") {
-		return getRandomColor(text, settings, isDarkMode);
+		return getRandomColor(text, settings, isDarkMode, shouldCache);
 	}
 
 	// Regular hash modes
@@ -1130,6 +1210,12 @@ function getColor(
 	if (textColorMap.has(textKey) && linkPaletteIndexMap.has(textKey)) {
 		return textColorMap.get(textKey)!;
 	}
+	
+	// Early return if not caching - compute color without storing
+	if (!shouldCache) {
+		return computeColorWithoutCaching(cleaned, settings, isDarkMode, seed);
+	}
+	
 	let hash: number;
 
 	switch (settings.hashMode) {
@@ -1177,6 +1263,44 @@ function getColor(
 
 	textColorMap.set(textKey, finalColor);
 	return finalColor;
+}
+
+/**
+ * Compute a color for display without caching it.
+ * Used for partial links during typing to avoid polluting the cache.
+ */
+function computeColorWithoutCaching(
+	cleaned: string,
+	settings: LinkColorSettings,
+	isDarkMode: boolean,
+	seed: number,
+): string {
+	let hash: number;
+
+	switch (settings.hashMode) {
+		case "strict-full":
+			hash = hashStrictFull(cleaned, seed);
+			break;
+		case "strict-acronym":
+			hash = hashStrictAcronym(cleaned, seed);
+			break;
+		case "phonetic-ipa":
+			hash = hashPhoneticIpa(cleaned, seed);
+			break;
+		default:
+			hash = hashStrictFull(cleaned, seed);
+	}
+
+	const paletteObj = PALETTES[settings.palette] ?? PALETTES["vibrant"]!;
+	const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
+	const paletteSize = colorList.length;
+
+	// Use hash directly for palette selection (no load balancing for uncached)
+	const paletteIndex = Math.abs(hash) % paletteSize;
+	const baseColor = colorList[paletteIndex]!;
+
+	const variantSeed = djb2Hash(cleaned + "|v", seed);
+	return applyAggressiveVariant(baseColor, variantSeed, 0, isDarkMode, settings);
 }
 
 

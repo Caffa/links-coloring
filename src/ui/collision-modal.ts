@@ -72,6 +72,50 @@ function extractLinkTextFromCacheKey(cacheKey: string): string {
 	return cacheKey;
 }
 
+/**
+ * Format a link text for display in the table view.
+ * Strips prefixes like "MD - " from "MD - Character Name" → "Character Name"
+ * But preserves file extensions like "filename.md" (doesn't strip to "md").
+ * 
+ * Common file extensions that should NOT be treated as stripped content.
+ */
+const COMMON_EXTENSIONS = new Set([
+	"md", "markdown", "txt", "pdf", "doc", "docx", "canvas",
+	"png", "jpg", "jpeg", "gif", "svg", "webp", "bmp",
+	"mp3", "mp4", "wav", "ogg", "webm",
+	"json", "yaml", "yml", "xml", "html", "css", "js", "ts",
+]);
+
+/**
+ * Smart display name for link text in the table view.
+ * Strips prefix separators (like "MD - Name" → "Name") but preserves
+ * file extensions (like "file.md" stays as "file.md", not "md").
+ */
+function formatLinkDisplay(linkText: string): string {
+	// First, try stripPrefix
+	const stripped = stripPrefix(linkText);
+	if (stripped === null) {
+		// No separator found, return as-is
+		return linkText;
+	}
+	
+	// Check if the stripped result looks like just a file extension
+	// e.g., if linkText was "something.md" and stripPrefix returned "md"
+	const lowerStripped = stripped.toLowerCase();
+	if (COMMON_EXTENSIONS.has(lowerStripped)) {
+		// This looks like a file extension was stripped, return original
+		return linkText;
+	}
+	
+	// Check if stripped result is very short (likely just an extension or fragment)
+	if (stripped.length <= 2) {
+		// Probably not meaningful, return original
+		return linkText;
+	}
+	
+	return stripped;
+}
+
 export interface ColorStats {
 	color: string;
 	count: number;
@@ -350,15 +394,15 @@ export class CollisionModal extends Modal {
 			// Column body
 			const body = column.createDiv({ cls: "collision-column-body" });
 
-			links.forEach((linkData) => {
-				const displayName = stripPrefix(linkData.linkText) ?? linkData.linkText;
-				const linkEl = body.createDiv({
-					cls: "collision-link-item",
-					text: displayName,
-				});
-				linkEl.title = linkData.linkText;
-				linkEl.style.color = linkData.color;
+		links.forEach((linkData) => {
+			const displayName = formatLinkDisplay(linkData.linkText);
+			const linkEl = body.createDiv({
+				cls: "collision-link-item",
+				text: displayName,
 			});
+			linkEl.title = linkData.linkText;
+			linkEl.style.color = linkData.color;
+		});
 		});
 
 		// Scroll hint

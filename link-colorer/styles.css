@@ -3,14 +3,7 @@
     margin-top: 20px;
 }
 
-/* Description text that appears under the Hash Mode dropdown */
-.link-color-mode-description {
-    font-size: 0.9em;
-    color: var(--text-muted);
-    margin-top: -10px; /* Pulls it closer to the setting above */
-    margin-bottom: 20px;
-    padding-left: 10px; /* Optional: align with setting text visually */
-}
+/* Mobile settings panel adjustments */
 
 /* The container for the color palette preview */
 .link-color-preview-container {
@@ -22,6 +15,96 @@
     padding: 15px;
     border-radius: 8px;
     background-color: var(--background-secondary);
+}
+
+/* Hash mode description container */
+.link-color-mode-description {
+    margin-top: 8px;
+    padding: 12px 16px;
+    background: var(--background-secondary);
+    border-radius: 8px;
+    margin-bottom: 16px;
+}
+
+.link-color-mode-main-desc {
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    line-height: 1.4;
+}
+
+.link-color-mode-examples {
+    padding-top: 10px;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.link-color-examples-label {
+    font-size: 0.85em;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+
+.link-color-example-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+    font-family: var(--font-monospace);
+    font-size: 0.85em;
+}
+
+.link-color-example-input {
+    color: var(--text-normal);
+    min-width: 120px;
+}
+
+.link-color-example-arrow {
+    color: var(--text-muted);
+}
+
+.link-color-example-output {
+    color: var(--text-accent);
+}
+
+/* Collision status bar */
+.link-color-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: var(--background-secondary);
+    border-radius: 8px;
+    margin-bottom: 16px;
+}
+
+.link-color-status-good {
+    color: #4ade80;
+    font-weight: bold;
+    font-size: 1.1em;
+}
+
+.link-color-status-warning {
+    color: #f59e0b;
+    font-weight: bold;
+    font-size: 1.1em;
+}
+
+.link-color-status-text {
+    color: var(--text-normal);
+    font-size: 0.9em;
+}
+
+.link-color-status-empty {
+    padding: 12px 16px;
+    background: var(--background-secondary);
+    border-radius: 8px;
+    margin-bottom: 16px;
+}
+
+.link-color-status-empty-text {
+    color: var(--text-muted);
+    font-size: 0.9em;
+    font-style: italic;
 }
 
 /* The individual color circles */
@@ -289,6 +372,25 @@
 }
 
 /* Mobile settings panel adjustments */
+.is-mobile .link-color-mode-description {
+    padding: 10px 12px;
+}
+
+.is-mobile .link-color-example-row {
+    flex-wrap: wrap;
+    font-size: 0.9em;
+}
+
+.is-mobile .link-color-status-bar {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 10px 12px;
+}
+
+.is-mobile .link-color-status-text {
+    font-size: 0.85em;
+}
+
 .is-mobile .link-color-preview-container {
     gap: 8px;
     padding: 10px;
@@ -495,20 +597,23 @@
 .collision-column-body {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     padding: 8px;
     overflow-y: auto;
 }
 
 .collision-link-item {
     font-size: 0.85em;
-    padding: 4px 8px;
+    line-height: 1.4;
+    padding: 6px 10px;
     border-radius: 4px;
     background: var(--background-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     cursor: default;
+    flex-shrink: 0;
+    min-height: 1.4em;
 }
 
 .collision-link-item:hover {
