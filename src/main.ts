@@ -29,6 +29,16 @@ import {
 	PALETTES,
 } from "./settings";
 import { CollisionModal } from "./ui/collision-modal";
+import { LRUCache } from "./lru-cache";
+import {
+	updatePerformanceConfig,
+	getCurrentConfig,
+	getVaultSizeTier,
+	getTierDisplayName,
+	type VaultSizeTier,
+	type VaultSizeInfo,
+} from "./performance-config";
+import { LimitedSet, debounce, perfTracker } from "./performance-config";
 
 // --- Reading view DOM coloring ---
 
@@ -97,21 +107,42 @@ function observeLinksInContainer(
 	colorLinksInElement(container, plugin.settings);
 
 	const observer = new MutationObserver((mutations) => {
+		// Performance: Filter mutations more aggressively
+		// Only recolor if actual link elements were added/changed
 		let shouldRecolor = false;
+		
 		for (const mutation of mutations) {
-			if (mutation.type === "childList" && mutation.addedNodes.length > 0) {
-				shouldRecolor = true;
-				break;
+			// Skip if no nodes added
+			if (mutation.type !== "childList" || mutation.addedNodes.length === 0) {
+				// Check attribute changes on link elements only
+				if (mutation.type === "attributes") {
+					const target = mutation.target as HTMLElement;
+					// Only care about link elements
+					if (target.tagName === "A" && 
+						(target.classList.contains("internal-link") || 
+						 target.hasAttribute("data-href"))) {
+						shouldRecolor = true;
+						break;
+					}
+				}
+				continue;
 			}
-			// Also handle attribute changes on links (Dataview may update data-href)
-			if (mutation.type === "attributes") {
-				const target = mutation.target as HTMLElement;
-				if (target.tagName === "A" || target.closest("a.internal-link, a[data-href]")) {
-					shouldRecolor = true;
-					break;
+			
+			// Check if added nodes contain links (more efficient than recoloring everything)
+			const addedNodes = Array.from(mutation.addedNodes);
+			for (const node of addedNodes) {
+				if (node instanceof HTMLElement) {
+					// Check if this node is a link or contains links
+					if (node.tagName === "A" || node.querySelector?.('a.internal-link, a[data-href]')) {
+						shouldRecolor = true;
+						break;
+					}
 				}
 			}
+			
+			if (shouldRecolor) break;
 		}
+		
 		if (shouldRecolor) {
 			colorLinksInElement(container, plugin.settings);
 		}
@@ -127,28 +158,33 @@ function observeLinksInContainer(
 	return observer;
 }
 
+// Performance: Use LRU cache to prevent unbounded memory growth
 // Global text-to-color mapping to ensure consistent shading per text
-const textColorMap = new Map<string, string>();
+let textColorMap = new LRUCache<string, string>({ maxSize: 3500 }); // Initial size, updated on vault detection
 // Track the palette index for each link (for collision statistics)
-const linkPaletteIndexMap = new Map<string, number>();
+let linkPaletteIndexMap = new LRUCache<string, number>({ maxSize: 3500 });
 // Track how many times each base color has been used (for shade generation)
 const colorUsageMap: ColorUsageMap = new Map();
 // Track current parent folder path for folder-based re-roll
 let currentParentFolderPath: string | null = null;
 // Track files that have been opened (to distinguish new file opens from tab switches)
-const openedFiles = new Set<string>();
+// Performance: Use LimitedSet to prevent unbounded growth
+let openedFiles = new LimitedSet<string>(150); // Initial size, updated on vault detection
 // Track which files have been precomputed to avoid redundant work
-const precomputedFiles = new Set<string>();
+let precomputedFiles = new LimitedSet<string>(75); // Initial size, updated on vault detection
+// Track when files were last precomputed (for cooldown)
+const lastPrecomputeTime = new Map<string, number>();
 // Track last known seed to detect changes - used to force view updates
 // Initialize to -1 (an impossible seed value) to force initial render
 let lastKnownSeed: number = -1;
 // Track last known hash mode to detect changes and invalidate cache
 let lastKnownHashMode: HashMode | null = null;
+
 // Bug 5: Dark mode revision counter — incremented on theme switch to
 // force cache invalidation so stale dark/light mode colors aren't reused
 let darkModeRevision = 0;
-// Mobile debouncing delay (ms) — avoid excessive recoloring on rapid mobile interactions
-const MOBILE_RECOLOR_DEBOUNCE_MS = 150;
+// Counter for auto-reroll check throttling
+let fileSwitchesSinceLastRerollCheck = 0;
 
 /**
  * Extract unique wiki-style links from a file (ASYNC VERSION)
@@ -331,6 +367,8 @@ async function collectSampleLinks(
 /**
  * Pre-compute colors for all links in the active file
  * This eliminates scroll lag by populating the cache before links come into view
+ * 
+ * Performance: Uses cooldown to prevent redundant precomputation on rapid file switches
  */
 async function precomputeFileLinkColors(
 	file: TFile,
@@ -338,10 +376,21 @@ async function precomputeFileLinkColors(
 ): Promise<void> {
 	const filePath = file.path;
 
-	// Skip if already precomputed (prevents redundant work on file switches)
+	// Performance: Check cooldown to prevent redundant work
+	const lastTime = lastPrecomputeTime.get(filePath) || 0;
+	const now = Date.now();
+	const cooldownMs = getCurrentConfig().precomputeCooldownMs;
+	if (now - lastTime < cooldownMs) {
+		// Skip if recently precomputed
+		return;
+	}
+
+	// Skip if already precomputed this session (prevents redundant work on file switches)
 	if (precomputedFiles.has(filePath)) {
 		return;
 	}
+
+	const startTime = perfTracker.start("precompute");
 
 	try {
 		const content = await plugin.app.vault.cachedRead(file);
@@ -353,8 +402,11 @@ async function precomputeFileLinkColors(
 			getColor(link, plugin.settings, isDarkMode);
 		}
 
-		// Mark as precomputed
+		// Mark as precomputed and record time
 		precomputedFiles.add(filePath);
+		lastPrecomputeTime.set(filePath, now);
+
+		perfTracker.end("precompute", startTime);
 	} catch (error) {
 		console.warn("Failed to precompute link colors:", filePath, error);
 	}
@@ -366,6 +418,8 @@ async function precomputeFileLinkColors(
  * distinct colors from the load-balancing algorithm. This is used for
  * priority files (e.g., "Chapter - *" pages) to ensure their most
  * frequently-appearing links get the best color distribution.
+ * 
+ * Performance: Uses cooldown to prevent redundant precomputation
  */
 async function precomputeFileLinkColorsByFrequency(
 	file: TFile,
@@ -373,10 +427,21 @@ async function precomputeFileLinkColorsByFrequency(
 ): Promise<void> {
 	const filePath = file.path;
 
+	// Performance: Check cooldown to prevent redundant work
+	const lastTime = lastPrecomputeTime.get(filePath) || 0;
+	const now = Date.now();
+	const cooldownMs = getCurrentConfig().precomputeCooldownMs;
+	if (now - lastTime < cooldownMs) {
+		// Skip if recently precomputed
+		return;
+	}
+
 	// Skip if already precomputed (prevents redundant work on file switches)
 	if (precomputedFiles.has(filePath)) {
 		return;
 	}
+
+	const startTime = perfTracker.start("precomputeFrequency");
 
 	try {
 		const content = await plugin.app.vault.cachedRead(file);
@@ -389,8 +454,11 @@ async function precomputeFileLinkColorsByFrequency(
 			getColor(link, plugin.settings, isDarkMode);
 		}
 
-		// Mark as precomputed
+		// Mark as precomputed and record time
 		precomputedFiles.add(filePath);
+		lastPrecomputeTime.set(filePath, now);
+
+		perfTracker.end("precomputeFrequency", startTime);
 	} catch (error) {
 		console.warn("Failed to precompute link colors by frequency:", error);
 	}
@@ -423,8 +491,10 @@ function getRandomColor(
 		? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
 		: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
 	const textKey = buildCacheKey(settings.palette, isDarkMode, darkModeRevision, seed, rangeKey, "random", cleaned);
-	if (textColorMap.has(textKey) && linkPaletteIndexMap.has(textKey)) {
-		return textColorMap.get(textKey)!;
+	// Performance: LRU cache access - moves to most-recently-used if found
+	const cachedColor = textColorMap.get(textKey);
+	if (cachedColor !== undefined && linkPaletteIndexMap.has(textKey)) {
+		return cachedColor;
 	}
 
 	// Early return if not caching - compute color without storing
@@ -494,17 +564,18 @@ function computeRandomColorWithoutCaching(
 
 
 
-// Export for UI components
+// Export for UI components (compatibility with existing code)
+// Performance: Convert LRU cache to Map for external use
 export function getTextColorMap(): Map<string, string> {
-	return textColorMap;
+	return new Map(textColorMap.entries());
 }
 
 export function getColorUsageMap(): Map<string, number> {
-	return colorUsageMap;
+	return new Map(colorUsageMap);
 }
 
 export function getLinkPaletteIndexMap(): Map<string, number> {
-	return linkPaletteIndexMap;
+	return new Map(linkPaletteIndexMap.entries());
 }
 
 export default class LinkColorPlugin extends Plugin {
@@ -520,9 +591,10 @@ export default class LinkColorPlugin extends Plugin {
 	/**
 	 * Get the current link-to-color mapping.
 	 * Returns a copy to prevent external modification.
+	 * Performance: Converts LRU cache to regular Map.
 	 */
 	getLinkColorMap(): Map<string, string> {
-		return new Map(textColorMap);
+		return new Map(textColorMap.entries());
 	}
 
 	/**
@@ -531,6 +603,40 @@ export default class LinkColorPlugin extends Plugin {
 	 */
 	getColorUsageStats(): Map<string, number> {
 		return new Map(colorUsageMap);
+	}
+
+	/**
+	 * Detect vault size and apply appropriate performance settings.
+	 * Automatically adjusts cache sizes and throttling based on vault complexity.
+	 */
+	private async detectAndApplyVaultSizeSettings(): Promise<void> {
+		try {
+			// Get all markdown files in vault
+			const files = this.app.vault.getMarkdownFiles();
+			const noteCount = files.length;
+
+			// Detect vault size tier
+			const tier = getVaultSizeTier(noteCount);
+			
+			// Apply performance configuration
+			updatePerformanceConfig(tier);
+			
+			// Update cache and set sizes with new limits
+			const config = getCurrentConfig();
+			textColorMap = new LRUCache<string, string>({ maxSize: config.maxCacheSize });
+			linkPaletteIndexMap = new LRUCache<string, number>({ maxSize: config.maxCacheSize });
+			openedFiles = new LimitedSet<string>(config.maxOpenedFiles);
+			precomputedFiles = new LimitedSet<string>(config.maxPrecomputedFiles);
+
+			console.log(
+				`[Link Colorer] Vault detected: ${noteCount} notes, tier: ${getTierDisplayName(tier)}, ` +
+				`cache: ${config.maxCacheSize}, debounce: ${config.fileSwitchDebounceMs}ms`
+			);
+		} catch (error) {
+			// Fallback to medium settings if detection fails
+			console.warn("[Link Colorer] Failed to detect vault size, using defaults", error);
+			updatePerformanceConfig('medium');
+		}
 	}
 
 	async onload() {
@@ -542,6 +648,9 @@ export default class LinkColorPlugin extends Plugin {
 
 		// --- Mobile detection ---
 		this.isMobile = (this.app as any).isMobile ?? false;
+		
+		// --- Vault size detection for auto-performance tuning ---
+		await this.detectAndApplyVaultSizeSettings();
 		
 		// Debug logging for mobile diagnostics
 		if (this.isMobile) {
@@ -603,11 +712,12 @@ export default class LinkColorPlugin extends Plugin {
 				if (this.recolorDebounceTimer !== null) {
 					window.clearTimeout(this.recolorDebounceTimer);
 				}
+				const delay = getCurrentConfig().mobileDebounceMs;
 				this.recolorDebounceTimer = window.setTimeout(() => {
 					this.setupReadingViewObservers();
 					this.recolorAllReadingViews();
 					this.recolorDebounceTimer = null;
-				}, MOBILE_RECOLOR_DEBOUNCE_MS);
+				}, delay);
 			});
 		}
 
@@ -616,7 +726,9 @@ export default class LinkColorPlugin extends Plugin {
 			this.app.workspace.on("active-leaf-change", () => {
 				// On mobile, use debouncing to avoid excessive recoloring during
 				// rapid navigation (swipe gestures, etc.)
-				const delay = this.isMobile ? MOBILE_RECOLOR_DEBOUNCE_MS : 100;
+				// Performance: Use configurable debounce delays from performance-config
+				const config = getCurrentConfig();
+				const delay = this.isMobile ? config.mobileDebounceMs : config.fileSwitchDebounceMs;
 				if (this.recolorDebounceTimer !== null) {
 					window.clearTimeout(this.recolorDebounceTimer);
 				}
@@ -628,7 +740,7 @@ export default class LinkColorPlugin extends Plugin {
 		);
 
 		this.registerEvent(
-			this.app.workspace.on("css-change", () => {
+			this.app.workspace.on("css-change", async () => {
 				// Bug 5: Increment dark mode revision to invalidate color cache
 				darkModeRevision++;
 				// Clear caches so colors are recalculated with the new theme
@@ -636,9 +748,10 @@ export default class LinkColorPlugin extends Plugin {
 				// Clear precomputed files so they'll be recomputed with new theme colors
 				precomputedFiles.clear();
 				// Precompute colors for the current active file with new theme
+				// Performance: Properly await async operation to avoid race conditions
 				const activeFile = this.app.workspace.getActiveFile();
 				if (activeFile) {
-					precomputeFileLinkColors(activeFile, this);
+					await precomputeFileLinkColors(activeFile, this);
 				}
 				this.app.workspace.updateOptions();
 				// Re-color reading view links with new theme
@@ -697,8 +810,14 @@ export default class LinkColorPlugin extends Plugin {
 				await precomputeFileLinkColors(file, this);
 
 				// OPTION 3: Auto-reroll when too many links share same color
+				// Performance: Throttled to only check every N file switches
 				if (this.settings.autoRerollThreshold > 0) {
-					await this.checkAndAutoReroll();
+					fileSwitchesSinceLastRerollCheck++;
+					const checkFrequency = getCurrentConfig().autoRerollCheckFrequency;
+					if (fileSwitchesSinceLastRerollCheck >= checkFrequency) {
+						await this.checkAndAutoReroll();
+						fileSwitchesSinceLastRerollCheck = 0;
+					}
 				}
 			}),
 		);
@@ -716,21 +835,25 @@ export default class LinkColorPlugin extends Plugin {
 	 * Check if color distribution is poor and auto-reroll if needed.
 	 * Auto-reroll triggers when the same color is assigned to more than
 	 * the threshold percentage of unique links.
+	 * 
+	 * Performance: Only runs every N file switches (throttled)
 	 */
 	async checkAndAutoReroll(): Promise<boolean> {
 		const threshold = this.settings.autoRerollThreshold;
 		if (threshold <= 0) return false;
 
+		// Performance: Skip if too few links (meaningless statistics)
+		const config = getCurrentConfig();
+		const totalLinks = textColorMap.size;
+		if (totalLinks < config.autoRerollMinLinks) return false;
+
 		// Count color distribution
 		const colorCounts = new Map<string, number>();
-		let totalLinks = 0;
 
+		// Performance: Use LRU cache entries() iterator
 		for (const [text, color] of textColorMap.entries()) {
 			colorCounts.set(color, (colorCounts.get(color) || 0) + 1);
-			totalLinks++;
 		}
-
-		if (totalLinks === 0) return false;
 
 		// Find the most used color
 		let maxCount = 0;
@@ -746,7 +869,7 @@ export default class LinkColorPlugin extends Plugin {
 		const percentage = (maxCount / totalLinks) * 100;
 
 		// Auto-reroll if exceeded threshold
-		if (percentage >= threshold && totalLinks >= 5) {
+		if (percentage >= threshold) {
 			console.log(`Link Colorer: Auto-reroll triggered - ${maxColor} used for ${maxCount}/${totalLinks} links (${percentage.toFixed(1)}%, threshold: ${threshold}%)`);
 			
 			const newSeed = Math.floor(Math.random() * 100000) + 1;
@@ -775,10 +898,12 @@ export default class LinkColorPlugin extends Plugin {
 		linkPaletteIndexMap.clear();
 		precomputedFiles.clear();
 		openedFiles.clear();
+		lastPrecomputeTime.clear();
 		currentParentFolderPath = null;
 		lastKnownSeed = -1;
 		lastKnownHashMode = null;
 		darkModeRevision = 0;
+		fileSwitchesSinceLastRerollCheck = 0;
 	}
 
 	/**
@@ -911,6 +1036,8 @@ export default class LinkColorPlugin extends Plugin {
 		colorUsageMap.clear();
 		linkPaletteIndexMap.clear();
 		precomputedFiles.clear();
+		// Clear precompute cooldown tracking
+		lastPrecomputeTime.clear();
 		// Note: Don't clear openedFiles - we want to remember which files
 		// have been opened even after color reset, to distinguish between
 		// "new files" and "switching between already-open tabs"
@@ -919,6 +1046,8 @@ export default class LinkColorPlugin extends Plugin {
 		lastKnownSeed = -1;
 		// Reset hash mode tracking to force cache invalidations
 		lastKnownHashMode = null;
+		// Reset auto-reroll check counter
+		fileSwitchesSinceLastRerollCheck = 0;
 		console.log("Color state reset");
 	}
 
@@ -928,6 +1057,8 @@ export default class LinkColorPlugin extends Plugin {
 	 * giving them the best color distribution from the load-balancing algorithm.
 	 * Within priority files, links with more occurrences are processed first,
 	 * so the most frequent links claim the most distinct colors.
+	 * 
+	 * Performance: Processes files in parallel batches to avoid blocking
 	 */
 	async priorityPrecompute() {
 		const prefix = this.settings.priorityFilePrefix?.trim();
@@ -951,14 +1082,29 @@ export default class LinkColorPlugin extends Plugin {
 			}
 		});
 
-		// Pre-compute priority files first with frequency-based ordering,
-		// so links that appear most often get the most distinct colors
-		for (const file of priorityFiles) {
-			await precomputeFileLinkColorsByFrequency(file, this);
-		}
-		for (const file of otherFiles) {
-			await precomputeFileLinkColors(file, this);
-		}
+		// Performance: Process files in parallel batches
+		// to avoid blocking when many tabs are open
+		const config = getCurrentConfig();
+		const batchSize = config.maxConcurrentPrecomputes;
+		
+		const processBatch = async (files: TFile[], useFrequency: boolean) => {
+			for (let i = 0; i < files.length; i += batchSize) {
+				const batch = files.slice(i, i + batchSize);
+				await Promise.all(
+					batch.map(file => 
+						useFrequency 
+							? precomputeFileLinkColorsByFrequency(file, this)
+							: precomputeFileLinkColors(file, this)
+					)
+				);
+			}
+		};
+
+		// Priority files get frequency-based ordering
+		await processBatch(priorityFiles, true);
+		
+		// Other files get standard precomputation
+		await processBatch(otherFiles, false);
 	}
 
 	// Force all open markdown views to re-render their decorations
@@ -1207,8 +1353,10 @@ function getColor(
 		? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
 		: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
 	const textKey = buildCacheKey(settings.palette, isDarkMode, darkModeRevision, seed, rangeKey, settings.hashMode, cleaned);
-	if (textColorMap.has(textKey) && linkPaletteIndexMap.has(textKey)) {
-		return textColorMap.get(textKey)!;
+	// Performance: LRU cache access - moves to most-recently-used if found
+	const cachedColor = textColorMap.get(textKey);
+	if (cachedColor !== undefined && linkPaletteIndexMap.has(textKey)) {
+		return cachedColor;
 	}
 	
 	// Early return if not caching - compute color without storing
