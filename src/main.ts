@@ -1,4 +1,4 @@
-import { syntaxTree } from "@codemirror/language";
+import { syntaxTree, syntaxTreeAvailable } from "@codemirror/language";
 import { type Extension, RangeSetBuilder } from "@codemirror/state";
 import {
 	Decoration,
@@ -179,6 +179,13 @@ const lastPrecomputeTime = new Map<string, number>();
 let lastKnownSeed: number = -1;
 // Track last known hash mode to detect changes and invalidate cache
 let lastKnownHashMode: HashMode | null = null;
+
+// Mobile fix: CM6 parses only an initial window (~3000 chars) eagerly, so the
+// first buildDecorations() can run against an incomplete syntax tree and
+// produce (near-)empty decorations that never refresh if no transaction
+// fires. Retry on a short timer until the visible range is parsed.
+const PARSE_RETRY_DELAY_MS = 200;
+const PARSE_RETRY_MAX = 20; // worst case ~4s of retries, then give up
 
 // Bug 5: Dark mode revision counter — incremented on theme switch to
 // force cache invalidation so stale dark/light mode colors aren't reused
@@ -1144,6 +1151,8 @@ function createLinkColorExtension(plugin: LinkColorPlugin, isMobile: boolean) {
 	return ViewPlugin.fromClass(
 		class {
 			decorations: DecorationSet;
+			private parseRetryTimer: number | null = null;
+			private parseRetries = 0;
 
 			constructor(view: EditorView) {
 				this.decorations = this.buildDecorations(view);
@@ -1151,6 +1160,7 @@ function createLinkColorExtension(plugin: LinkColorPlugin, isMobile: boolean) {
 				if (isMobile) {
 					console.log("[Link Colorer] ViewPlugin constructor - Initial decorations created");
 				}
+				this.scheduleParseRetry(view);
 			}
 
 			update(update: ViewUpdate) {
@@ -1170,7 +1180,18 @@ function createLinkColorExtension(plugin: LinkColorPlugin, isMobile: boolean) {
 				// Rebuild decorations on any change that could affect rendering.
 				// On mobile, `focusChanged` is important because the editor may
 				// lose and regain focus during swipe gestures, keyboard toggles, etc.
-				const shouldRebuild = update.docChanged || update.viewportChanged || seedChanged || hashModeChanged || update.focusChanged;
+				// `treeChanged`: the background parser finished/advanced without any
+				// transaction (docChanged/viewportChanged both false when it does),
+				// so decorations built against a partial tree would otherwise never
+				// refresh.
+				const treeChanged = syntaxTree(update.startState) !== syntaxTree(update.state);
+				const shouldRebuild =
+					update.docChanged ||
+					update.viewportChanged ||
+					seedChanged ||
+					hashModeChanged ||
+					update.focusChanged ||
+					treeChanged;
 				
 				if (shouldRebuild) {
 					this.decorations = this.buildDecorations(update.view);
@@ -1189,6 +1210,50 @@ function createLinkColorExtension(plugin: LinkColorPlugin, isMobile: boolean) {
 				// Update the tracked values after processing
 				lastKnownSeed = currentSeed;
 				lastKnownHashMode = currentHashMode;
+			}
+
+			destroy(): void {
+				if (this.parseRetryTimer !== null) {
+					window.clearTimeout(this.parseRetryTimer);
+					this.parseRetryTimer = null;
+				}
+			}
+
+			/**
+			 * Schedule a bounded chain of deferred rebuilds while the background
+			 * parser is still working. `buildDecorations` reads `view.visibleRanges`
+			 * against the partial `syntaxTree`, so we target the check at the
+			 * largest visible range instead of the whole document (much shorter
+			 * wait on huge notes, correct on mobile and desktop alike).
+			 */
+			scheduleParseRetry(view: EditorView): void {
+				if (this.parseRetries >= PARSE_RETRY_MAX) return;
+				let parsedUpTo = 0;
+				for (const range of view.visibleRanges) {
+					parsedUpTo = Math.max(parsedUpTo, range.to);
+				}
+				if (parsedUpTo === 0) return; // no viewport yet; update() handles it
+				if (syntaxTreeAvailable(view.state, parsedUpTo)) return;
+				this.parseRetries++;
+				if (isMobile) {
+					console.debug(`[Link Colorer] Syntax tree incomplete - retry #${this.parseRetries} in ${PARSE_RETRY_DELAY_MS}ms`);
+				}
+				this.parseRetryTimer = window.setTimeout(() => {
+					this.parseRetryTimer = null;
+					// View may have been destroyed while we waited.
+					if (!view.dom || !view.dom.isConnected) return;
+					// Never touch the view mid-IME-composition (CJK input); retrying
+					// instead avoids interrupting an in-progress composition.
+					if (view.composing) {
+						this.scheduleParseRetry(view);
+						return;
+					}
+					this.decorations = this.buildDecorations(view);
+					// Plugin field changes between transactions are only re-read on a
+					// view update; an empty transaction is the cheapest such update.
+					view.dispatch({});
+					this.scheduleParseRetry(view); // continue until visible range is parsed
+				}, PARSE_RETRY_DELAY_MS);
 			}
 
 			buildDecorations(view: EditorView): DecorationSet {

@@ -341,6 +341,25 @@
     background-color: transparent !important;
 }
 
+/* Live Preview (all platforms): Obsidian wraps internal-link text in an
+ * <a class="cm-underline"> whose own color declaration beats the inline
+ * color we set on our mark spans whenever the anchor sits above or beside
+ * them (observed on mobile WKWebView; same root cause reported by
+ * Supercharged Links #232/#271, whose fix is a matching inherit rule).
+ * Scoped to anchors connected to our decoration spans so unrelated,
+ * external, and unresolved links keep their theme styling. Desktop impact
+ * is a no-op (anchors there have no text of their own). Older desktop
+ * builds without :has() support simply ignore those selectors. */
+.consistent-link-target a.cm-underline,
+.consistent-link-alias a.cm-underline,
+a.cm-underline:has(.consistent-link-target),
+a.cm-underline:has(.consistent-link-alias),
+a.cm-underline:has(+ .consistent-link-target),
+a.cm-underline:has(+ .consistent-link-alias) {
+    color: inherit !important;
+    -webkit-text-fill-color: inherit !important;
+}
+
 /* In reading view, ensure our inline styles on <a> tags win.
  * Some themes set color via --link-color CSS variable which cascades. */
 .markdown-preview-view a.internal-link[style],
