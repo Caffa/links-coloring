@@ -11,80 +11,8 @@ import type LinkColorPlugin from "../main";
 import { PALETTES } from "../settings";
 import { getLinkPaletteIndexMap } from "../main";
 import { stripPrefix } from "../color-utils";
-
-/**
- * Extract the actual link text from a cache key.
- * Cache key format: {palette}-{dark/light}-r{revision}-{seed}-{rangeKey}-{modeKey}-{cleanedText}
- * The cleanedText is everything after the modeKey (which follows the rangeKey).
- */
-function extractLinkTextFromCacheKey(cacheKey: string): string {
-	// Split by "-" and find where the actual link text starts
-	// Format: palette-dark/light-r{rev}-{seed}-{satMin}-{satMax}-{lightMin}-{lightMax}-{modeKey}-{cleanedText}
-	// The rangeKey contains 4 hyphen-separated values
-	const parts = cacheKey.split("-");
-	
-	// Find the modeKey position
-	// After: palette(1) + dark/light(1) + r{rev}(1) + seed(1) + rangeKey(4) = 8 parts
-	// Then modeKey can be "strict-full" (2 parts), "phonetic-ipa" (2 parts), etc.
-	// So we need to find where modeKey ends and cleanedText begins
-	
-	// Known modeKeys: strict-full, strict-acronym, phonetic-ipa, random
-	// They all have hyphens in them except "random"
-	// After position 8 (0-indexed: parts 0-7), we have: modeKey parts + cleanedText
-	
-	// The cleanedText is at the very end. Since modeKey is known (one of the hash modes),
-	// and cleanedText is the original link text trimmed and lowercased,
-	// we can work backwards from the known structure.
-	
-	// Actually, the simplest approach: the cleanedText is ALWAYS the last segment(s)
-	// We need to figure out how many parts belong to the modeKey
-	
-	// Looking at the format after position 7:
-	// For "strict-full": parts[8]="strict", parts[9]="full", then parts[10+] is cleanedText
-	// For "random": parts[8]="random", then parts[9+] is cleanedText
-	
-	// The issue is we don't know the modeKey here. Let's try a different approach:
-	// The cleanedText is lowercased, so we can try to identify it.
-	
-	// Alternative: split from known prefixes
-	// The cleaned text starts after: palette-dark-r{rev}-seed-{4 range values}-{modeKey}
-	// That's: 1 + 1 + 1 + 1 + 4 + (modeKey parts) = 8 + modeKey parts
-	
-	// For simplicity, let's join everything after the first 10-11 parts
-	// Most modeKeys are 1-2 parts, so cleanedText starts around index 9-10
-	
-	// Actually, let's be smarter: find known modeKey patterns
-	const knownModes = ["strict-full", "strict-acronym", "phonetic-ipa", "random"];
-	
-	for (const mode of knownModes) {
-		const modeParts = mode.split("-");
-		const searchStr = modeParts.join("-");
-		const idx = cacheKey.indexOf(searchStr);
-		if (idx !== -1) {
-			// Found modeKey, cleanedText is everything after it
-			const afterMode = cacheKey.substring(idx + searchStr.length);
-			// Remove leading "-" if present
-			return afterMode.startsWith("-") ? afterMode.substring(1) : afterMode;
-		}
-	}
-	
-	// Fallback: return the whole key
-	return cacheKey;
-}
-
-/**
- * Format a link text for display in the table view.
- * Strips prefixes like "MD - " from "MD - Character Name" → "Character Name"
- * But preserves file extensions like "filename.md" (doesn't strip to "md").
- * 
- * Common file extensions that should NOT be treated as stripped content.
- */
-const COMMON_EXTENSIONS = new Set([
-	"md", "markdown", "txt", "pdf", "doc", "docx", "canvas",
-	"png", "jpg", "jpeg", "gif", "svg", "webp", "bmp",
-	"mp3", "mp4", "wav", "ogg", "webm",
-	"json", "yaml", "yml", "xml", "html", "css", "js", "ts",
-]);
+import { aggregateCollisionStats, COMMON_EXTENSIONS } from "../collision-stats";
+import type { ColorStats, LinkColorData } from "../collision-stats";
 
 /**
  * Smart display name for link text in the table view.
@@ -116,20 +44,6 @@ function formatLinkDisplay(linkText: string): string {
 	return stripped;
 }
 
-export interface ColorStats {
-	color: string;
-	count: number;
-	percentage: number;
-	paletteIndex: number;
-	uniqueVariants: number;
-}
-
-export interface LinkColorData {
-	linkText: string;
-	color: string;
-	paletteIndex: number;
-}
-
 export type ViewMode = "chart" | "table";
 
 export class CollisionModal extends Modal {
@@ -148,10 +62,27 @@ export class CollisionModal extends Modal {
 	onOpen() {
 		this.calculateStats();
 		this.render();
+		this.rebuildStatsAndRender();
+	}
+
+	private rebuildStatsAndRender() {
+		void this.plugin.rebuildLinkColorStats()
+			.then(() => {
+				if (this.contentEl.isConnected) {
+					this.calculateStats();
+					this.render();
+				}
+			})
+			.catch((err) => {
+				console.warn("[Link Colorer] Collision stats rebuild failed", err);
+				if (this.contentEl.isConnected) {
+					this.calculateStats();
+					this.render();
+				}
+			});
 	}
 
 	private calculateStats() {
-		// Get the link-to-color mapping and palette index mapping from the plugin
 		const linkColorMap = this.plugin.getLinkColorMap();
 		const linkPaletteIndexMap = getLinkPaletteIndexMap();
 		const paletteKey = this.plugin.settings.palette;
@@ -159,67 +90,10 @@ export class CollisionModal extends Modal {
 		const isDarkMode = document.body.classList.contains("theme-dark");
 		const colorList = isDarkMode ? palette.dark : palette.light;
 
-		// Reset stats
-		this.stats = [];
-		this.linksByColor.clear();
-		this.totalLinks = 0;
-
-		// Initialize counters for all palette colors
-		const colorCounts = new Map<number, number>();
-		for (let i = 0; i < colorList.length; i++) {
-			colorCounts.set(i, 0);
-		}
-
-		// Track unique variants per palette color
-		const variantsPerColor = new Map<number, Set<string>>();
-
-		// Count links per palette index
-		linkColorMap.forEach((color, cacheKey) => {
-			// Extract actual link text from the cache key
-			const linkText = extractLinkTextFromCacheKey(cacheKey);
-			
-			const paletteIndex = linkPaletteIndexMap.get(cacheKey);
-			if (paletteIndex !== undefined && paletteIndex < colorList.length) {
-				const currentCount = colorCounts.get(paletteIndex) ?? 0;
-				colorCounts.set(paletteIndex, currentCount + 1);
-				this.totalLinks++;
-
-				// Track variants
-				if (!variantsPerColor.has(paletteIndex)) {
-					variantsPerColor.set(paletteIndex, new Set());
-				}
-				variantsPerColor.get(paletteIndex)?.add(color.toLowerCase());
-
-				// Track link data for table view
-				const baseColor = colorList[paletteIndex];
-				if (baseColor && !this.linksByColor.has(baseColor)) {
-					this.linksByColor.set(baseColor, []);
-				}
-				if (baseColor) {
-					this.linksByColor.get(baseColor)?.push({
-						linkText,
-						color,
-						paletteIndex,
-					});
-				}
-			}
-		});
-
-		// Convert to stats array sorted by count descending
-		this.stats = Array.from(colorCounts.entries())
-			.map(([index, count]) => ({
-				color: colorList[index]!,
-				count,
-				percentage: this.totalLinks > 0 ? (count / this.totalLinks) * 100 : 0,
-				paletteIndex: index,
-				uniqueVariants: variantsPerColor.get(index)?.size ?? 0,
-			}))
-			.sort((a, b) => b.count - a.count);
-
-		// Sort links alphabetically within each color
-		this.linksByColor.forEach((links) => {
-			links.sort((a, b) => a.linkText.localeCompare(b.linkText));
-		});
+		const result = aggregateCollisionStats(linkColorMap, linkPaletteIndexMap, colorList);
+		this.stats = result.stats;
+		this.linksByColor = result.linksByColor;
+		this.totalLinks = result.totalLinks;
 	}
 
 	private render() {
@@ -257,12 +131,11 @@ export class CollisionModal extends Modal {
 		// Refresh button
 		new Setting(this.contentEl)
 			.setName("Refresh data")
-			.setDesc("Recalculate statistics from current link colors")
+			.setDesc("Rebuild link colors and statistics from your vault")
 			.addButton((btn) => {
 				btn.setButtonText("Refresh");
 				btn.onClick(() => {
-					this.calculateStats();
-					this.render();
+					this.rebuildStatsAndRender();
 				});
 			});
 

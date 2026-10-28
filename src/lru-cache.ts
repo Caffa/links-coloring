@@ -62,9 +62,17 @@ export class LRUCache<K = string, V = unknown> {
 
 	/**
 	 * Check if key exists in cache.
+	 * Promotes the entry to most-recently-used if found.
 	 */
 	has(key: K): boolean {
-		return this.cache.has(key);
+		// Returns false for a stored undefined value; instances only store strings/numbers.
+		const value = this.cache.get(key);
+		if (value === undefined) {
+			return false;
+		}
+		this.cache.delete(key);
+		this.cache.set(key, value);
+		return true;
 	}
 
 	/**

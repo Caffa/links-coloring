@@ -482,6 +482,7 @@ function getRandomColor(
 	settings: LinkColorSettings,
 	isDarkMode: boolean,
 	shouldCache: boolean = true,
+	recordStats: boolean = false,
 ): string {
 	// 1. Clean Prefix (Bug 4: multi-separator support)
 	if (settings.ignorePrefix) {
@@ -506,7 +507,14 @@ function getRandomColor(
 
 	// Early return if not caching - compute color without storing
 	if (!shouldCache) {
-		return computeRandomColorWithoutCaching(cleaned, settings, isDarkMode, seed);
+		const result = computeRandomColorWithoutCaching(cleaned, settings, isDarkMode, seed);
+		if (recordStats) {
+			// Recording writes both maps without a load-balancing increment, so the
+			// rendered Live Preview color pins the recorded palette index by design.
+			linkPaletteIndexMap.set(textKey, result.paletteIndex);
+			textColorMap.set(textKey, result.color);
+		}
+		return result.color;
 	}
 
 	// 4. Generate random hash (different from other modes)
@@ -555,7 +563,7 @@ function computeRandomColorWithoutCaching(
 	settings: LinkColorSettings,
 	isDarkMode: boolean,
 	seed: number,
-): string {
+): UncachedColorResult {
 	const hash = djb2Hash(cleaned, seed);
 	const paletteObj = PALETTES[settings.palette] ?? PALETTES["vibrant"]!;
 	const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
@@ -566,7 +574,8 @@ function computeRandomColorWithoutCaching(
 	const baseColor = colorList[paletteIndex]!;
 
 	const variantSeed = djb2Hash(cleaned + "|v", seed);
-	return applyAggressiveVariant(baseColor, variantSeed, 0, isDarkMode, settings);
+	const color = applyAggressiveVariant(baseColor, variantSeed, 0, isDarkMode, settings);
+	return { color, paletteIndex };
 }
 
 
@@ -594,6 +603,8 @@ export default class LinkColorPlugin extends Plugin {
 	private isMobile: boolean;
 	// Debounce timer for mobile-optimized recoloring
 	private recolorDebounceTimer: number | null = null;
+	// Guard against overlapping rebuildLinkColorStats invocations
+	private rebuilding = false;
 
 	/**
 	 * Get the current link-to-color mapping.
@@ -752,6 +763,7 @@ export default class LinkColorPlugin extends Plugin {
 				darkModeRevision++;
 				// Clear caches so colors are recalculated with the new theme
 				textColorMap.clear();
+				linkPaletteIndexMap.clear();
 				// Clear precomputed files so they'll be recomputed with new theme colors
 				precomputedFiles.clear();
 				// Precompute colors for the current active file with new theme
@@ -1038,7 +1050,6 @@ export default class LinkColorPlugin extends Plugin {
 
 	// Reset all color tracking
 	resetColorState() {
-		const previousSize = textColorMap.size;
 		textColorMap.clear();
 		colorUsageMap.clear();
 		linkPaletteIndexMap.clear();
@@ -1051,8 +1062,11 @@ export default class LinkColorPlugin extends Plugin {
 		// Reset seed tracking to force view update on next render
 		// Setting to -1 ensures next view update will detect seed change
 		lastKnownSeed = -1;
-		// Reset hash mode tracking to force cache invalidations
-		lastKnownHashMode = null;
+		// Keep hash mode tracking at its current value.
+		// After a reroll, the caches are empty and will be repopulated by priorityPrecompute / view update.
+		// If lastKnownHashMode were reset to null, the next CM6 ViewPlugin update would see
+		// hashModeChanged=true and clear the freshly repopulated textColorMap again, leaving
+		// collision statistics empty while links are still colored.
 		// Reset auto-reroll check counter
 		fileSwitchesSinceLastRerollCheck = 0;
 		console.log("Color state reset");
@@ -1145,6 +1159,32 @@ export default class LinkColorPlugin extends Plugin {
 		// Re-setup observers in case dynamic content changed
 		this.setupReadingViewObservers();
 	}
+
+	/**
+	 * Rebuild collision statistics from the current open workspace state.
+	 * Bypasses precomputed-file sticky guards and the precompute cooldown so
+	 * the modal can recover after cache wipes.
+	 */
+	async rebuildLinkColorStats(): Promise<void> {
+		if (this.rebuilding) return;
+		this.rebuilding = true;
+		try {
+			// Deliberately do NOT clear textColorMap, linkPaletteIndexMap, or
+			// colorUsageMap here. Recomputation reuses load-balancing state, so
+			// recovered colors may shift slightly after a cache wipe/desync —
+			// that is intended recovery behavior.
+			precomputedFiles.clear();
+			lastPrecomputeTime.clear();
+			await this.priorityPrecompute();
+			this.recolorAllReadingViews();
+			console.log(
+				`[Link Colorer] Rebuilt collision stats: ${textColorMap.size} colors, ` +
+				`${linkPaletteIndexMap.size} palette indices`,
+			);
+		} finally {
+			this.rebuilding = false;
+		}
+	}
 }
 
 function createLinkColorExtension(plugin: LinkColorPlugin, isMobile: boolean) {
@@ -1174,6 +1214,7 @@ function createLinkColorExtension(plugin: LinkColorPlugin, isMobile: boolean) {
 				// Clear cache when hash mode changes to ensure colors update immediately
 				if (hashModeChanged) {
 					textColorMap.clear();
+					linkPaletteIndexMap.clear();
 					colorUsageMap.clear();
 				}
 				
@@ -1301,6 +1342,17 @@ function createLinkColorExtension(plugin: LinkColorPlugin, isMobile: boolean) {
 							// 2. Detect Link End
 							// token type is unexpected (e.g., inside an embed block).
 							if (type.includes("formatting-link-end") || text === "]]") {
+								if (inLink && !isEmbed && targetTextBuffer) {
+									// Record the completed link target for collision statistics without
+									// running load balancing (the per-node partial calls already did that).
+									getColor(
+										targetTextBuffer,
+										plugin.settings,
+										isDarkMode,
+										false, // shouldCache: false - do not touch load balancing
+										true, // recordStats: true - register final palette index
+									);
+								}
 								inLink = false;
 								isEmbed = false;
 								return;
@@ -1396,10 +1448,11 @@ function getColor(
 	settings: LinkColorSettings,
 	isDarkMode: boolean,
 	shouldCache: boolean = true,
+	recordStats: boolean = false,
 ): string {
 	// Handle special modes first
 	if (settings.hashMode === "random") {
-		return getRandomColor(text, settings, isDarkMode, shouldCache);
+		return getRandomColor(text, settings, isDarkMode, shouldCache, recordStats);
 	}
 
 	// Regular hash modes
@@ -1423,10 +1476,17 @@ function getColor(
 	if (cachedColor !== undefined && linkPaletteIndexMap.has(textKey)) {
 		return cachedColor;
 	}
-	
+
 	// Early return if not caching - compute color without storing
 	if (!shouldCache) {
-		return computeColorWithoutCaching(cleaned, settings, isDarkMode, seed);
+		const result = computeColorWithoutCaching(cleaned, settings, isDarkMode, seed);
+		if (recordStats) {
+			// Recording writes both maps without a load-balancing increment, so the
+			// rendered Live Preview color pins the recorded palette index by design.
+			linkPaletteIndexMap.set(textKey, result.paletteIndex);
+			textColorMap.set(textKey, result.color);
+		}
+		return result.color;
 	}
 	
 	let hash: number;
@@ -1478,16 +1538,22 @@ function getColor(
 	return finalColor;
 }
 
+interface UncachedColorResult {
+	color: string;
+	paletteIndex: number;
+}
+
 /**
  * Compute a color for display without caching it.
- * Used for partial links during typing to avoid polluting the cache.
+ * Returns { color, paletteIndex } and is used for Live Preview complete-link
+ * recording (recordStats) and other uncached paths.
  */
 function computeColorWithoutCaching(
 	cleaned: string,
 	settings: LinkColorSettings,
 	isDarkMode: boolean,
 	seed: number,
-): string {
+): UncachedColorResult {
 	let hash: number;
 
 	switch (settings.hashMode) {
@@ -1513,7 +1579,8 @@ function computeColorWithoutCaching(
 	const baseColor = colorList[paletteIndex]!;
 
 	const variantSeed = djb2Hash(cleaned + "|v", seed);
-	return applyAggressiveVariant(baseColor, variantSeed, 0, isDarkMode, settings);
+	const color = applyAggressiveVariant(baseColor, variantSeed, 0, isDarkMode, settings);
+	return { color, paletteIndex };
 }
 
 
