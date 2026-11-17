@@ -8,28 +8,26 @@ import {
 	type ViewUpdate,
 } from "@codemirror/view";
 import { type App, Plugin, type TFile, type Vault, MarkdownView } from "obsidian";
-import { hashPhoneticIpa } from "./phonetic";
 import {
-	type ColorUsageMap,
-	COLOR_USAGE_NORMALIZE_THRESHOLD,
-	applyAggressiveVariant,
-	buildCacheKey,
-	djb2Hash,
-	hashStrictAcronym,
-	hashStrictFull,
-	normalizeColorUsage,
-	selectPaletteIndexWithLoadBalancing,
-	stripPrefix,
-} from "./color-utils";
+	colorUsageMap,
+	getColor,
+	getColorUsageMap,
+	getLinkPaletteIndexMap,
+	getTextColorMap,
+	incrementDarkModeRevision,
+	linkPaletteIndexMap,
+	resetDarkModeRevision,
+	resizeColorCaches,
+	textColorMap,
+} from "./color-core";
 import {
 	DEFAULT_SETTINGS,
 	type HashMode,
 	type LinkColorSettings,
-	LinkColorSettingTab,
-	PALETTES,
-} from "./settings";
+} from "./settings-data";
+import { LinkColorSettingTab } from "./settings";
 import { CollisionModal } from "./ui/collision-modal";
-import { LRUCache } from "./lru-cache";
+import { createPublicApi, createStubApi, disposeApi, emitRecolorEvent, type LinkColorerApi } from "./public-api";
 import {
 	updatePerformanceConfig,
 	getCurrentConfig,
@@ -158,13 +156,6 @@ function observeLinksInContainer(
 	return observer;
 }
 
-// Performance: Use LRU cache to prevent unbounded memory growth
-// Global text-to-color mapping to ensure consistent shading per text
-let textColorMap = new LRUCache<string, string>({ maxSize: 3500 }); // Initial size, updated on vault detection
-// Track the palette index for each link (for collision statistics)
-let linkPaletteIndexMap = new LRUCache<string, number>({ maxSize: 3500 });
-// Track how many times each base color has been used (for shade generation)
-const colorUsageMap: ColorUsageMap = new Map();
 // Track current parent folder path for folder-based re-roll
 let currentParentFolderPath: string | null = null;
 // Track files that have been opened (to distinguish new file opens from tab switches)
@@ -187,9 +178,6 @@ let lastKnownHashMode: HashMode | null = null;
 const PARSE_RETRY_DELAY_MS = 200;
 const PARSE_RETRY_MAX = 20; // worst case ~4s of retries, then give up
 
-// Bug 5: Dark mode revision counter — incremented on theme switch to
-// force cache invalidation so stale dark/light mode colors aren't reused
-let darkModeRevision = 0;
 // Counter for auto-reroll check throttling
 let fileSwitchesSinceLastRerollCheck = 0;
 
@@ -471,132 +459,16 @@ async function precomputeFileLinkColorsByFrequency(
 	}
 }
 
-/**
- * Get random color from palette with consistency and color avoidance
- * - Uses caching to ensure same link text gets same color per session
- * - Implements load balancing to avoid overusing colors
- * - Applies hue/shade adjustments for visual distinction
- */
-function getRandomColor(
-	text: string,
-	settings: LinkColorSettings,
-	isDarkMode: boolean,
-	shouldCache: boolean = true,
-	recordStats: boolean = false,
-): string {
-	// 1. Clean Prefix (Bug 4: multi-separator support)
-	if (settings.ignorePrefix) {
-		const stripped = stripPrefix(text);
-		if (stripped !== null) text = stripped;
-	}
-
-	// 2. Prepare Data
-	const cleaned = text.trim().toLowerCase();
-	const seed = settings.customSeed;
-
-	// 3. Check Cache (Bug 5: include darkModeRevision in key)
-	const rangeKey = isDarkMode
-		? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
-		: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
-	const textKey = buildCacheKey(settings.palette, isDarkMode, darkModeRevision, seed, rangeKey, "random", cleaned);
-	// Performance: LRU cache access - moves to most-recently-used if found
-	const cachedColor = textColorMap.get(textKey);
-	if (cachedColor !== undefined && linkPaletteIndexMap.has(textKey)) {
-		return cachedColor;
-	}
-
-	// Early return if not caching - compute color without storing
-	if (!shouldCache) {
-		const result = computeRandomColorWithoutCaching(cleaned, settings, isDarkMode, seed);
-		if (recordStats) {
-			// Recording writes both maps without a load-balancing increment, so the
-			// rendered Live Preview color pins the recorded palette index by design.
-			linkPaletteIndexMap.set(textKey, result.paletteIndex);
-			textColorMap.set(textKey, result.color);
-		}
-		return result.color;
-	}
-
-	// 4. Generate random hash (different from other modes)
-	const hash = djb2Hash(cleaned, seed);
-
-	// 5. Select Palette with Load Balancing (Bug 1: includes hash mode; Bug 3: improved tiebreaker)
-	const paletteObj = PALETTES[settings.palette] ?? PALETTES["vibrant"]!;
-	const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
-	const paletteSize = colorList.length;
-
-	const bestIndex = selectPaletteIndexWithLoadBalancing(
-		colorUsageMap, hash, settings.palette, "random", isDarkMode, seed, paletteSize,
-	);
-
-	const selectedKey = `${settings.palette}-random-${isDarkMode ? "dark" : "light"}-${seed}-${bestIndex}`;
-	const currentUsageCount = colorUsageMap.get(selectedKey) || 0;
-
-	const actualUsageCount = currentUsageCount;
-	const baseColor = colorList[bestIndex]!;
-
-	// 7. Apply Hue/Shade Adjustments (same as other modes)
-	const variantSeed = djb2Hash(cleaned + "|v", seed);
-	const finalColor = applyAggressiveVariant(
-		baseColor,
-		variantSeed,
-		actualUsageCount,
-		isDarkMode,
-		settings,
-	);
-
-	// Store palette index for collision statistics (use textKey for consistency)
-	linkPaletteIndexMap.set(textKey, bestIndex);
-
-	// 8. Cache Result
-	textColorMap.set(textKey, finalColor);
-
-	return finalColor;
-}
-
-/**
- * Compute a random color for display without caching it.
- * Used for partial links during typing to avoid polluting the cache.
- */
-function computeRandomColorWithoutCaching(
-	cleaned: string,
-	settings: LinkColorSettings,
-	isDarkMode: boolean,
-	seed: number,
-): UncachedColorResult {
-	const hash = djb2Hash(cleaned, seed);
-	const paletteObj = PALETTES[settings.palette] ?? PALETTES["vibrant"]!;
-	const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
-	const paletteSize = colorList.length;
-
-	// Use hash directly for palette selection (no load balancing for uncached)
-	const paletteIndex = Math.abs(hash) % paletteSize;
-	const baseColor = colorList[paletteIndex]!;
-
-	const variantSeed = djb2Hash(cleaned + "|v", seed);
-	const color = applyAggressiveVariant(baseColor, variantSeed, 0, isDarkMode, settings);
-	return { color, paletteIndex };
-}
-
-
-
-// Export for UI components (compatibility with existing code)
-// Performance: Convert LRU cache to Map for external use
-export function getTextColorMap(): Map<string, string> {
-	return new Map(textColorMap.entries());
-}
-
-export function getColorUsageMap(): Map<string, number> {
-	return new Map(colorUsageMap);
-}
-
-export function getLinkPaletteIndexMap(): Map<string, number> {
-	return new Map(linkPaletteIndexMap.entries());
-}
+// Re-export cache snapshot helpers for backward compatibility with consumers
+// that imported them directly from main.ts. The implementations live in
+// color-core.ts so the public API and the renderer share the same state.
+export { getTextColorMap, getColorUsageMap, getLinkPaletteIndexMap } from "./color-core";
 
 export default class LinkColorPlugin extends Plugin {
 	settings: LinkColorSettings;
 	editorExtension: Extension;
+	// Public API object; assigned once settings are loaded.
+	api?: LinkColorerApi;
 	// MutationObservers for reading view / Dataview link coloring (one per preview pane)
 	private readingViewObservers: MutationObserver[] = [];
 	// Whether the plugin is running on Obsidian Mobile
@@ -607,12 +479,20 @@ export default class LinkColorPlugin extends Plugin {
 	private rebuilding = false;
 
 	/**
+	 * Return the stable public API for other plugins.
+	 * Before onload finishes this returns a safe null-object stub.
+	 */
+	getApi(): LinkColorerApi {
+		return this.api ?? createStubApi();
+	}
+
+	/**
 	 * Get the current link-to-color mapping.
 	 * Returns a copy to prevent external modification.
 	 * Performance: Converts LRU cache to regular Map.
 	 */
 	getLinkColorMap(): Map<string, string> {
-		return new Map(textColorMap.entries());
+		return getTextColorMap();
 	}
 
 	/**
@@ -620,7 +500,7 @@ export default class LinkColorPlugin extends Plugin {
 	 * Returns a copy to prevent external modification.
 	 */
 	getColorUsageStats(): Map<string, number> {
-		return new Map(colorUsageMap);
+		return getColorUsageMap();
 	}
 
 	/**
@@ -641,8 +521,7 @@ export default class LinkColorPlugin extends Plugin {
 			
 			// Update cache and set sizes with new limits
 			const config = getCurrentConfig();
-			textColorMap = new LRUCache<string, string>({ maxSize: config.maxCacheSize });
-			linkPaletteIndexMap = new LRUCache<string, number>({ maxSize: config.maxCacheSize });
+			resizeColorCaches(config.maxCacheSize);
 			openedFiles = new LimitedSet<string>(config.maxOpenedFiles);
 			precomputedFiles = new LimitedSet<string>(config.maxPrecomputedFiles);
 
@@ -663,6 +542,10 @@ export default class LinkColorPlugin extends Plugin {
 		lastKnownSeed = this.settings.customSeed;
 		// Initialize hash mode tracking from settings to avoid spurious cache clear on first render
 		lastKnownHashMode = this.settings.hashMode;
+
+		// --- Public API (shared with window so other plugins can poll) ---
+		this.api = createPublicApi(this);
+		(window as typeof window & { linkColorerApi?: LinkColorerApi }).linkColorerApi = this.api;
 
 		// --- Mobile detection ---
 		this.isMobile = (this.app as any).isMobile ?? false;
@@ -696,7 +579,7 @@ export default class LinkColorPlugin extends Plugin {
 				const newSeed = Math.floor(Math.random() * 100000) + 1;
 				this.settings.customSeed = newSeed;
 				this.resetColorState();
-				await this.saveSettings();
+				await this.saveSettings('reroll');
 				await this.forceViewUpdate();
 			},
 		});
@@ -760,7 +643,7 @@ export default class LinkColorPlugin extends Plugin {
 		this.registerEvent(
 			this.app.workspace.on("css-change", async () => {
 				// Bug 5: Increment dark mode revision to invalidate color cache
-				darkModeRevision++;
+				incrementDarkModeRevision();
 				// Clear caches so colors are recalculated with the new theme
 				textColorMap.clear();
 				linkPaletteIndexMap.clear();
@@ -802,6 +685,7 @@ export default class LinkColorPlugin extends Plugin {
 					this.settings.customSeed = newSeed;
 					// Clear the color cache so new colors are generated
 					this.resetColorState();
+					emitRecolorEvent(this, 'reroll');
 					// Update tracked folder
 					currentParentFolderPath = newParentPath;
 					// Mark file as opened (after reset, since reset clears openedFiles)
@@ -894,7 +778,7 @@ export default class LinkColorPlugin extends Plugin {
 			const newSeed = Math.floor(Math.random() * 100000) + 1;
 			this.settings.customSeed = newSeed;
 			this.resetColorState();
-			await this.saveSettings();
+			await this.saveSettings('auto-reroll');
 			await this.forceViewUpdate();
 			return true;
 		}
@@ -910,6 +794,16 @@ export default class LinkColorPlugin extends Plugin {
 			window.clearTimeout(this.recolorDebounceTimer);
 			this.recolorDebounceTimer = null;
 		}
+		// Remove the public API from window so other plugins know we're gone.
+		// Hot-reload safety: guard against a different plugin owning the property.
+		const win = window as typeof window & { linkColorerApi?: LinkColorerApi };
+		if (win.linkColorerApi === this.api) {
+			delete win.linkColorerApi;
+		}
+		if (this.api) {
+			disposeApi(this.api);
+		}
+		this.api = undefined;
 		// Bug 9: Clear all module-level state on unload to prevent stale
 		// data from persisting across hot-reloads
 		textColorMap.clear();
@@ -921,7 +815,7 @@ export default class LinkColorPlugin extends Plugin {
 		currentParentFolderPath = null;
 		lastKnownSeed = -1;
 		lastKnownHashMode = null;
-		darkModeRevision = 0;
+		resetDarkModeRevision();
 		fileSwitchesSinceLastRerollCheck = 0;
 	}
 
@@ -1041,11 +935,12 @@ export default class LinkColorPlugin extends Plugin {
 		) as LinkColorSettings;
 	}
 
-	async saveSettings() {
+	async saveSettings(reason: 'settings' | 'reroll' | 'auto-reroll' = 'settings') {
 		await this.saveData(this.settings);
 		this.app.workspace.updateOptions();
 		// Re-color reading view links when settings change
 		this.recolorAllReadingViews();
+		emitRecolorEvent(this, reason);
 	}
 
 	// Reset all color tracking
@@ -1439,148 +1334,6 @@ function createLinkColorExtension(plugin: LinkColorPlugin, isMobile: boolean) {
 			decorations: (v) => v.decorations,
 		},
 	);
-}
-
-
-
-function getColor(
-	text: string,
-	settings: LinkColorSettings,
-	isDarkMode: boolean,
-	shouldCache: boolean = true,
-	recordStats: boolean = false,
-): string {
-	// Handle special modes first
-	if (settings.hashMode === "random") {
-		return getRandomColor(text, settings, isDarkMode, shouldCache, recordStats);
-	}
-
-	// Regular hash modes
-	// 1. Clean Prefix (Bug 4: multi-separator support)
-	if (settings.ignorePrefix) {
-		const stripped = stripPrefix(text);
-		if (stripped !== null) text = stripped;
-	}
-
-	// 2. Prepare Data
-	const cleaned = text.trim().toLowerCase();
-
-	// 3. Check Cache (Bug 5: include darkModeRevision)
-	const seed = settings.customSeed;
-	const rangeKey = isDarkMode
-		? `${settings.darkSaturationMin}-${settings.darkSaturationMax}-${settings.darkLightnessMin}-${settings.darkLightnessMax}`
-		: `${settings.lightSaturationMin}-${settings.lightSaturationMax}-${settings.lightLightnessMin}-${settings.lightLightnessMax}`;
-	const textKey = buildCacheKey(settings.palette, isDarkMode, darkModeRevision, seed, rangeKey, settings.hashMode, cleaned);
-	// Performance: LRU cache access - moves to most-recently-used if found
-	const cachedColor = textColorMap.get(textKey);
-	if (cachedColor !== undefined && linkPaletteIndexMap.has(textKey)) {
-		return cachedColor;
-	}
-
-	// Early return if not caching - compute color without storing
-	if (!shouldCache) {
-		const result = computeColorWithoutCaching(cleaned, settings, isDarkMode, seed);
-		if (recordStats) {
-			// Recording writes both maps without a load-balancing increment, so the
-			// rendered Live Preview color pins the recorded palette index by design.
-			linkPaletteIndexMap.set(textKey, result.paletteIndex);
-			textColorMap.set(textKey, result.color);
-		}
-		return result.color;
-	}
-	
-	let hash: number;
-
-	switch (settings.hashMode) {
-		case "strict-full":
-			hash = hashStrictFull(cleaned, seed);
-			break;
-		case "strict-acronym":
-			hash = hashStrictAcronym(cleaned, seed);
-			break;
-		case "phonetic-ipa":
-			hash = hashPhoneticIpa(cleaned, seed);
-			break;
-		default:
-			hash = hashStrictFull(cleaned, seed);
-	}
-
-	// 5. Select Palette (Bug 1: includes hash mode; Bug 3: improved tiebreaker)
-	const paletteObj = PALETTES[settings.palette] ?? PALETTES["vibrant"]!;
-	const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
-	const paletteSize = colorList.length;
-
-	const bestIndex = selectPaletteIndexWithLoadBalancing(
-		colorUsageMap, hash, settings.palette, settings.hashMode, isDarkMode, seed, paletteSize,
-	);
-
-	const selectedKey = `${settings.palette}-${settings.hashMode}-${isDarkMode ? "dark" : "light"}-${seed}-${bestIndex}`;
-	const currentUsageCount = colorUsageMap.get(selectedKey) || 0;
-
-	const baseColor = colorList[bestIndex]!;
-
-	// Store palette index for collision statistics (use textKey for consistency)
-	linkPaletteIndexMap.set(textKey, bestIndex);
-
-	// 7. Variant Seed
-	const variantSeed = djb2Hash(cleaned + "|v", seed);
-
-	// 8. Apply Aggressive Variant
-	const finalColor = applyAggressiveVariant(
-		baseColor,
-		variantSeed,
-		currentUsageCount,
-		isDarkMode,
-		settings,
-	);
-
-	textColorMap.set(textKey, finalColor);
-	return finalColor;
-}
-
-interface UncachedColorResult {
-	color: string;
-	paletteIndex: number;
-}
-
-/**
- * Compute a color for display without caching it.
- * Returns { color, paletteIndex } and is used for Live Preview complete-link
- * recording (recordStats) and other uncached paths.
- */
-function computeColorWithoutCaching(
-	cleaned: string,
-	settings: LinkColorSettings,
-	isDarkMode: boolean,
-	seed: number,
-): UncachedColorResult {
-	let hash: number;
-
-	switch (settings.hashMode) {
-		case "strict-full":
-			hash = hashStrictFull(cleaned, seed);
-			break;
-		case "strict-acronym":
-			hash = hashStrictAcronym(cleaned, seed);
-			break;
-		case "phonetic-ipa":
-			hash = hashPhoneticIpa(cleaned, seed);
-			break;
-		default:
-			hash = hashStrictFull(cleaned, seed);
-	}
-
-	const paletteObj = PALETTES[settings.palette] ?? PALETTES["vibrant"]!;
-	const colorList = isDarkMode ? paletteObj.dark : paletteObj.light;
-	const paletteSize = colorList.length;
-
-	// Use hash directly for palette selection (no load balancing for uncached)
-	const paletteIndex = Math.abs(hash) % paletteSize;
-	const baseColor = colorList[paletteIndex]!;
-
-	const variantSeed = djb2Hash(cleaned + "|v", seed);
-	const color = applyAggressiveVariant(baseColor, variantSeed, 0, isDarkMode, settings);
-	return { color, paletteIndex };
 }
 
 
