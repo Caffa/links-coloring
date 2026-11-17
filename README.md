@@ -36,6 +36,68 @@ The settings menu shows you what the colors look like.
     - `[[Char - Charlus]]` → Colors based on "Charlus"
     - `[[Loc - Hogwarts]]` → Colors based on "Hogwarts"
 
+## Public API for other plugins
+
+Other plugins can ask Link Colorer for the color of a link. The result is exact for links Link Colorer has already colored; otherwise it is computed deterministically from the text hash (matching what Live Preview will paint first). API calls never mutate the color cache, usage stats, or collision statistics. Consumers should refresh on the `link-colorer:recolor` workspace event.
+
+```js
+// Poll-safe: the plugin may be lazy-loaded, so check before calling.
+const plugin = app.plugins.plugins['link-colorer'];
+const api = plugin?.getApi?.();
+if (api?.isReady?.()) {
+  const color = api.getColorForLink('Char - B'); // e.g. "#a1b2c3"
+}
+```
+
+You can also read `window.linkColorerApi` once the plugin has loaded. The same object is assigned there and removed when the plugin unloads, so consumers can poll without holding a plugin reference.
+
+```js
+const api = window.linkColorerApi;
+if (api?.isReady?.()) {
+  api.getColorForLink('Char - B');
+}
+```
+
+### API surface
+
+```ts
+interface LinkColorerApi {
+  version: 1;
+  isReady(): boolean;
+  getColorForLink(text: string): string | null;          // hex like #a1b2c3
+  getColorsForLinks(texts: string[]): Record<string, string | null>;
+  onRecolor(cb: () => void | Promise<void>): () => void;
+}
+```
+
+- `getColorForLink` returns `null` for empty/whitespace input, missing settings, or any unexpected failure. It never throws.
+- `getColorsForLinks` is a batch convenience that calls `getColorForLink` for each entry.
+- `onRecolor` registers a callback that runs when colors are recalculated. It returns an unsubscribe function that removes just that callback — call it before re-registering (e.g. on every refresh) so handlers don't stack up. The plugin still cleans up any surviving handler on unload, so ignoring the return value keeps working:
+
+  ```js
+  const unsubscribe = api.onRecolor(() => refreshColors());
+  // Later (e.g. on your own unload):
+  unsubscribe();
+  ```
+
+### Recolor events
+
+The plugin fires `link-colorer:recolor` on the workspace with a stable payload:
+
+```js
+app.workspace.on('link-colorer:recolor', ({ reason }) => {
+  // reason is 'settings' | 'reroll' | 'auto-reroll'
+});
+```
+
+Events are emitted from settings updates (reason `settings`), the **Reroll Colors** command, the auto-reroll path (reason `auto-reroll`), **Shuffle all colors**, **Reset color cache**, and folder-based rerolls (reason `reroll`).
+
+Theme switches recompute all colors silently without emitting an event: the plugin listens to Obsidian's own `css-change` internally. Consumers should either re-poll `getColorForLink` when they see Obsidian's `css-change`, or register their own listener:
+
+```js
+app.workspace.on('css-change', () => refreshColors());
+```
+
 ## Notes
 
 It ignores embeds (the `![[link]]` format).
